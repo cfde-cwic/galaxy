@@ -4147,6 +4147,10 @@ mapping:
           Set static_responses to a YAML file path to replace all LLM calls with
           deterministic responses for testing:
           inference_services: { static_responses: test/integration/static_agents.yml }
+          Per-agent or default-block ``structured_output_override: true|false``
+          beats the shipped capability table at config/agent_model_capabilities.yml.sample,
+          which is consulted to decide whether the configured model can produce
+          tool-calling / JSON-mode output.
 
       enable_tool_recommendations:
         type: bool

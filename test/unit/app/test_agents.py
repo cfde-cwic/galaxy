@@ -827,6 +827,79 @@ class TestAgentUnitMocked:
         agent = WorkflowOrchestratorAgent(self.deps)
         return agent
 
+    def test_supports_structured_output_capability_table_match(self):
+        """Glob-matched models in the capability table should answer correctly."""
+        self.mock_config.inference_services = None
+
+        self.mock_config.ai_model = "deepseek-r1"
+        deepseek_agent = ErrorAnalysisAgent(self.deps)
+        assert deepseek_agent._supports_structured_output() is False
+
+        self.mock_config.ai_model = "gpt-4o"
+        gpt_agent = ErrorAnalysisAgent(self.deps)
+        assert gpt_agent._supports_structured_output() is True
+
+    def test_supports_structured_output_admin_override_takes_precedence(self):
+        """Admin override beats whatever the capability table says."""
+        # Per-agent override flips deepseek (table says False) to True.
+        self.mock_config.ai_model = "deepseek-r1"
+        self.mock_config.inference_services = {
+            "error_analysis": {"structured_output_override": True},
+        }
+        agent = ErrorAnalysisAgent(self.deps)
+        assert agent._supports_structured_output() is True
+
+        # Default-block override applies when there's no per-agent setting.
+        self.mock_config.inference_services = {
+            "default": {"structured_output_override": False},
+        }
+        self.mock_config.ai_model = "gpt-4o"
+        gpt_agent = ErrorAnalysisAgent(self.deps)
+        assert gpt_agent._supports_structured_output() is False
+
+    def test_supports_structured_output_falls_back_to_default(self):
+        """Unknown model names hit the table's default block."""
+        self.mock_config.inference_services = None
+        self.mock_config.ai_model = "some-totally-new-model-2030"
+        agent = ErrorAnalysisAgent(self.deps)
+        # Shipped sample sets default.structured_output: true.
+        assert agent._supports_structured_output() is True
+
+    def test_capability_table_glob_matching(self):
+        """Globs should match wildcard suffixes (e.g. gpt-4-turbo)."""
+        from galaxy.agents.base import (
+            _capability_for_model,
+            _load_model_capabilities,
+        )
+
+        table = _load_model_capabilities()
+        assert _capability_for_model("gpt-4-turbo", "structured_output", table) is True
+        assert _capability_for_model("gpt-4o-mini", "structured_output", table) is True
+        assert _capability_for_model("claude-3-5-sonnet", "structured_output", table) is True
+        # Provider prefixes get stripped before matching.
+        assert _capability_for_model("openai:gpt-4o", "structured_output", table) is True
+        assert _capability_for_model("anthropic:claude-3-5-sonnet", "structured_output", table) is True
+        # DeepSeek family is explicitly opted out.
+        assert _capability_for_model("deepseek-r1", "structured_output", table) is False
+        assert _capability_for_model("deepseek-v3", "structured_output", table) is False
+
+    def test_capability_table_loads_with_missing_file(self, monkeypatch):
+        """Force every search path to miss; loader should warn and use defaults."""
+        from galaxy.agents import base as agents_base
+
+        monkeypatch.setattr(agents_base, "_MODEL_CAPABILITIES_SEARCH_PATHS", ())
+        monkeypatch.setattr(agents_base, "_model_capabilities_cache", None)
+
+        table = agents_base._load_model_capabilities(force_reload=True)
+
+        # Should be the hardcoded fallback.
+        assert table is agents_base._DEFAULT_MODEL_CAPABILITIES
+        assert agents_base._capability_for_model("deepseek-r1", "structured_output", table) is False
+        assert agents_base._capability_for_model("gpt-4o", "structured_output", table) is True
+
+        # Reset cache so subsequent tests pick up the real file again.
+        monkeypatch.setattr(agents_base, "_model_capabilities_cache", None)
+
 
 @pytestmark_live_llm
 class TestAgentUnitLiveLLM:

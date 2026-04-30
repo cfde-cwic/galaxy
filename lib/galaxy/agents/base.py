@@ -3,7 +3,9 @@ Base classes for Galaxy AI agents.
 """
 
 import asyncio
+import fnmatch
 import logging
+import os
 import random
 from abc import (
     ABC,
@@ -24,6 +26,8 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+
+import yaml
 
 from galaxy.managers.context import ProvidesUserContext
 from galaxy.model import User
@@ -94,6 +98,97 @@ TOOL_HELPER_HISTORY_MESSAGES = 8
 Tool-context turns burn token budget faster (tool call + tool return +
 follow-up), so we hand the sub-agent a smaller window.
 """
+
+# Hardcoded fallback if the capability YAML can't be located. Mirrors the
+# previous behaviour (deepseek -> no structured output, everything else yes).
+_DEFAULT_MODEL_CAPABILITIES: dict[str, Any] = {
+    "model_capabilities": [
+        {"pattern": "deepseek*", "structured_output": False},
+    ],
+    "default": {"structured_output": True},
+}
+
+# Search order for the capability table. First hit wins.
+_MODEL_CAPABILITIES_BASENAME = "agent_model_capabilities.yml"
+_MODEL_CAPABILITIES_SEARCH_PATHS = (
+    # Admin-edited copy in the runtime config directory.
+    os.path.join("config", _MODEL_CAPABILITIES_BASENAME),
+    # The shipped sample (what most installs will end up reading).
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "config",
+        "sample",
+        _MODEL_CAPABILITIES_BASENAME + ".sample",
+    ),
+    os.path.join("config", _MODEL_CAPABILITIES_BASENAME + ".sample"),
+)
+
+_model_capabilities_cache: Optional[dict[str, Any]] = None
+
+
+def _load_model_capabilities(force_reload: bool = False) -> dict[str, Any]:
+    """Return the parsed model-capabilities table, loading it on first use.
+
+    Looks at a small set of standard locations and parses the first one that
+    exists. Falls back to a sane hardcoded default if nothing is found or the
+    file fails to parse -- we'd rather keep agents working than block on a
+    missing config file.
+    """
+    global _model_capabilities_cache
+    if _model_capabilities_cache is not None and not force_reload:
+        return _model_capabilities_cache
+
+    for path in _MODEL_CAPABILITIES_SEARCH_PATHS:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path) as fh:
+                parsed = yaml.safe_load(fh) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            log.warning("Could not parse model capabilities at %s: %s", path, exc)
+            continue
+        if not isinstance(parsed, dict):
+            log.warning("Ignoring model capabilities at %s: not a mapping", path)
+            continue
+        _model_capabilities_cache = parsed
+        return _model_capabilities_cache
+
+    log.warning(
+        "Model capabilities file not found (looked in %s); falling back to built-in defaults.",
+        ", ".join(_MODEL_CAPABILITIES_SEARCH_PATHS),
+    )
+    _model_capabilities_cache = _DEFAULT_MODEL_CAPABILITIES
+    return _model_capabilities_cache
+
+
+def _capability_for_model(model_name: str, capability: str, table: dict[str, Any]) -> Optional[bool]:
+    """Look up `capability` for `model_name` against the parsed table.
+
+    Strips any `provider:` prefix before matching. Returns None when neither
+    a pattern nor a default entry covers the capability -- callers decide
+    what to do with that.
+    """
+    if not model_name:
+        return None
+
+    bare_name = model_name.split(":", 1)[1] if ":" in model_name else model_name
+    bare_name = bare_name.lower()
+
+    for entry in table.get("model_capabilities", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        pattern = entry.get("pattern")
+        if not pattern:
+            continue
+        if fnmatch.fnmatch(bare_name, pattern.lower()):
+            if capability in entry:
+                return bool(entry[capability])
+
+    default_block = table.get("default") or {}
+    if isinstance(default_block, dict) and capability in default_block:
+        return bool(default_block[capability])
+    return None
+
 
 __all__ = [
     "ActionSuggestion",
@@ -599,13 +694,21 @@ class BaseGalaxyAgent(ABC):
     def _supports_structured_output(self) -> bool:
         """Check if current model supports structured output (tool calling/JSON mode).
 
-        Assumes support by default, excluding known-failing models.
+        Resolution order:
+          1. Agent-specific ``structured_output_override`` in inference_services
+          2. Global ``default.structured_output_override`` in inference_services
+          3. Glob match against the shipped capability table
+          4. The capability table's ``default`` block (true if absent)
         """
-        model_name = self._get_agent_config("model", "").lower()
+        override = self._get_agent_config("structured_output_override")
+        if override is not None:
+            return bool(override)
 
-        # TODO: revisit this list as model support improves
-        unsupported = ["deepseek"]
-        return not any(m in model_name for m in unsupported)
+        model_name = self._get_agent_config("model", "")
+        capability = _capability_for_model(model_name, "structured_output", _load_model_capabilities())
+        if capability is None:
+            return True
+        return capability
 
     def _requires_structured_output(self) -> bool:
         """Override in agents that require structured output to function."""
