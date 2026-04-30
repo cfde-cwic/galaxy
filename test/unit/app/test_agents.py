@@ -52,7 +52,10 @@ from galaxy.agents.base import truncate_message_history
 from galaxy.agents.registry import build_default_registry
 
 agent_registry = build_default_registry()
+from galaxy.agents import base as agents_base
 from galaxy.agents.base import (
+    _capability_for_model,
+    _load_model_capabilities,
     AgentResponse,
     AgentRunState,
     AgentType,
@@ -867,11 +870,6 @@ class TestAgentUnitMocked:
 
     def test_capability_table_glob_matching(self):
         """Globs should match wildcard suffixes (e.g. gpt-4-turbo)."""
-        from galaxy.agents.base import (
-            _capability_for_model,
-            _load_model_capabilities,
-        )
-
         table = _load_model_capabilities()
         assert _capability_for_model("gpt-4-turbo", "structured_output", table) is True
         assert _capability_for_model("gpt-4o-mini", "structured_output", table) is True
@@ -885,8 +883,6 @@ class TestAgentUnitMocked:
 
     def test_capability_table_loads_with_missing_file(self, monkeypatch):
         """Force every search path to miss; loader should warn and use defaults."""
-        from galaxy.agents import base as agents_base
-
         monkeypatch.setattr(agents_base, "_MODEL_CAPABILITIES_SEARCH_PATHS", ())
         monkeypatch.setattr(agents_base, "_model_capabilities_cache", None)
 
@@ -894,8 +890,8 @@ class TestAgentUnitMocked:
 
         # Should be the hardcoded fallback.
         assert table is agents_base._DEFAULT_MODEL_CAPABILITIES
-        assert agents_base._capability_for_model("deepseek-r1", "structured_output", table) is False
-        assert agents_base._capability_for_model("gpt-4o", "structured_output", table) is True
+        assert _capability_for_model("deepseek-r1", "structured_output", table) is False
+        assert _capability_for_model("gpt-4o", "structured_output", table) is True
 
         # Reset cache so subsequent tests pick up the real file again.
         monkeypatch.setattr(agents_base, "_model_capabilities_cache", None)
