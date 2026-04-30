@@ -3040,10 +3040,12 @@ galaxy:
   # path to replace all LLM calls with deterministic responses for
   # testing: inference_services: { static_responses:
   # test/integration/static_agents.yml } Per-agent or default-block
-  # ``structured_output_override: true|false`` beats the shipped
-  # capability table at config/agent_model_capabilities.yml.sample,
-  # which is consulted to decide whether the configured model can
-  # produce tool-calling / JSON-mode output.
+  # ``structured_output_override: true|false`` beats the model capability
+  # table. Admins can place overrides in config/agent_model_capabilities.yml;
+  # otherwise Galaxy reads the shipped sample from
+  # lib/galaxy/config/sample/agent_model_capabilities.yml.sample. The table is
+  # consulted to decide whether the configured model can produce tool-calling /
+  # JSON-mode output.
   #inference_services: null
 
   # Allow the display of tool recommendations in workflow editor and

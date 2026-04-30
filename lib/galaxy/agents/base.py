@@ -697,8 +697,8 @@ class BaseGalaxyAgent(ABC):
         Resolution order:
           1. Agent-specific ``structured_output_override`` in inference_services
           2. Global ``default.structured_output_override`` in inference_services
-          3. Glob match against the shipped capability table
-          4. The capability table's ``default`` block (true if absent)
+          3. Glob match against the admin capability table, or shipped sample
+          4. The selected table's ``default`` block (true if absent)
         """
         override = self._get_agent_config("structured_output_override")
         if override is not None:
