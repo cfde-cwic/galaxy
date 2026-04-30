@@ -4148,11 +4148,23 @@ mapping:
           deterministic responses for testing:
           inference_services: { static_responses: test/integration/static_agents.yml }
           Per-agent or default-block ``structured_output_override: true|false``
-          beats the model capability table. Admins can place overrides in
-          config/agent_model_capabilities.yml; otherwise Galaxy reads the
-          shipped sample from lib/galaxy/config/sample/agent_model_capabilities.yml.sample.
-          The table is consulted to decide whether the configured model can
-          produce tool-calling / JSON-mode output.
+          beats the model capability table -- see ``agent_model_capabilities_file``
+          for the table's location and contents.
+
+      agent_model_capabilities_file:
+        type: str
+        default: agent_model_capabilities.yml
+        path_resolves_to: config_dir
+        required: false
+        desc: |
+          YAML file with capability hints for agent inference models. Maps
+          fnmatch-style globs against model names to features such as
+          structured-output (tool-calling / JSON-mode) support. Galaxy ships a
+          sample populated with common model families; admins can drop a file
+          named ``agent_model_capabilities.yml`` in ``config_dir`` to override
+          the shipped table for private models. ``inference_services``
+          ``structured_output_override`` overrides this table for a specific
+          agent or default block.
 
       enable_tool_recommendations:
         type: bool

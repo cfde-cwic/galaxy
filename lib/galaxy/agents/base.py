@@ -108,57 +108,45 @@ _DEFAULT_MODEL_CAPABILITIES: dict[str, Any] = {
     "default": {"structured_output": True},
 }
 
-# Search order for the capability table. First hit wins.
-_MODEL_CAPABILITIES_BASENAME = "agent_model_capabilities.yml"
-_MODEL_CAPABILITIES_SEARCH_PATHS = (
-    # Admin-edited copy in the runtime config directory.
-    os.path.join("config", _MODEL_CAPABILITIES_BASENAME),
-    # The shipped sample (what most installs will end up reading).
-    os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "config",
-        "sample",
-        _MODEL_CAPABILITIES_BASENAME + ".sample",
-    ),
-    os.path.join("config", _MODEL_CAPABILITIES_BASENAME + ".sample"),
-)
-
-_model_capabilities_cache: Optional[dict[str, Any]] = None
+_model_capabilities_cache: dict[str, dict[str, Any]] = {}
 
 
-def _load_model_capabilities(force_reload: bool = False) -> dict[str, Any]:
-    """Return the parsed model-capabilities table, loading it on first use.
+def _load_model_capabilities(path: Optional[str], force_reload: bool = False) -> dict[str, Any]:
+    """Return the parsed model-capabilities table for ``path``.
 
-    Looks at a small set of standard locations and parses the first one that
-    exists. Falls back to a sane hardcoded default if nothing is found or the
-    file fails to parse -- we'd rather keep agents working than block on a
-    missing config file.
+    ``path`` should come from ``config.agent_model_capabilities_file``, which
+    Galaxy resolves at startup (admin override in ``config_dir`` if present,
+    otherwise the shipped sample under ``sample_config_dir``). Falls back to a
+    sane hardcoded default when the input is missing, not a string, or points
+    at a file we can't parse -- we'd rather keep agents working than block on
+    a misconfigured deployment.
     """
-    global _model_capabilities_cache
-    if _model_capabilities_cache is not None and not force_reload:
-        return _model_capabilities_cache
+    if not isinstance(path, str) or not path:
+        return _DEFAULT_MODEL_CAPABILITIES
 
-    for path in _MODEL_CAPABILITIES_SEARCH_PATHS:
-        if not os.path.exists(path):
-            continue
-        try:
-            with open(path) as fh:
-                parsed = yaml.safe_load(fh) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            log.warning("Could not parse model capabilities at %s: %s", path, exc)
-            continue
-        if not isinstance(parsed, dict):
-            log.warning("Ignoring model capabilities at %s: not a mapping", path)
-            continue
-        _model_capabilities_cache = parsed
-        return _model_capabilities_cache
+    if not force_reload and path in _model_capabilities_cache:
+        return _model_capabilities_cache[path]
 
-    log.warning(
-        "Model capabilities file not found (looked in %s); falling back to built-in defaults.",
-        ", ".join(_MODEL_CAPABILITIES_SEARCH_PATHS),
-    )
-    _model_capabilities_cache = _DEFAULT_MODEL_CAPABILITIES
-    return _model_capabilities_cache
+    if not os.path.exists(path):
+        log.warning("Model capabilities file not found at %s; using built-in defaults.", path)
+        _model_capabilities_cache[path] = _DEFAULT_MODEL_CAPABILITIES
+        return _DEFAULT_MODEL_CAPABILITIES
+
+    try:
+        with open(path) as fh:
+            parsed = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        log.warning("Could not parse model capabilities at %s: %s; using built-in defaults.", path, exc)
+        _model_capabilities_cache[path] = _DEFAULT_MODEL_CAPABILITIES
+        return _DEFAULT_MODEL_CAPABILITIES
+
+    if not isinstance(parsed, dict):
+        log.warning("Ignoring model capabilities at %s: not a mapping; using built-in defaults.", path)
+        _model_capabilities_cache[path] = _DEFAULT_MODEL_CAPABILITIES
+        return _DEFAULT_MODEL_CAPABILITIES
+
+    _model_capabilities_cache[path] = parsed
+    return parsed
 
 
 def _capability_for_model(model_name: str, capability: str, table: dict[str, Any]) -> Optional[bool]:
@@ -697,15 +685,18 @@ class BaseGalaxyAgent(ABC):
         Resolution order:
           1. Agent-specific ``structured_output_override`` in inference_services
           2. Global ``default.structured_output_override`` in inference_services
-          3. Glob match against the admin capability table, or shipped sample
-          4. The selected table's ``default`` block (true if absent)
+          3. Glob match in the capability table at ``config.agent_model_capabilities_file``
+             (Galaxy resolves this to the admin override in ``config_dir`` if present,
+             otherwise the shipped sample under ``sample_config_dir``)
+          4. The capability table's ``default`` block (true if absent)
         """
         override = self._get_agent_config("structured_output_override")
         if override is not None:
             return bool(override)
 
         model_name = self._get_agent_config("model", "")
-        capability = _capability_for_model(model_name, "structured_output", _load_model_capabilities())
+        capabilities_path = getattr(self.deps.config, "agent_model_capabilities_file", None)
+        capability = _capability_for_model(model_name, "structured_output", _load_model_capabilities(capabilities_path))
         if capability is None:
             return True
         return capability

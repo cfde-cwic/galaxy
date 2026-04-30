@@ -76,6 +76,15 @@ class TestAgentUnitMocked:
         self.mock_config.ai_api_key = "test-key"
         self.mock_config.ai_model = "llama-4-scout"
         self.mock_config.ai_api_base_url = "http://localhost:4000/v1/"
+        # Point at the shipped capability sample so _supports_structured_output
+        # exercises the real table rather than the built-in fallback.
+        self.mock_config.agent_model_capabilities_file = os.path.join(
+            os.path.dirname(agents_base.__file__),
+            "..",
+            "config",
+            "sample",
+            "agent_model_capabilities.yml.sample",
+        )
 
         self.mock_user = mock.Mock()
         self.mock_user.id = 1
@@ -870,7 +879,7 @@ class TestAgentUnitMocked:
 
     def test_capability_table_glob_matching(self):
         """Globs should match wildcard suffixes (e.g. gpt-4-turbo)."""
-        table = _load_model_capabilities()
+        table = _load_model_capabilities(self.mock_config.agent_model_capabilities_file)
         assert _capability_for_model("gpt-4-turbo", "structured_output", table) is True
         assert _capability_for_model("gpt-4o-mini", "structured_output", table) is True
         assert _capability_for_model("claude-3-5-sonnet", "structured_output", table) is True
@@ -881,20 +890,17 @@ class TestAgentUnitMocked:
         assert _capability_for_model("deepseek-r1", "structured_output", table) is False
         assert _capability_for_model("deepseek-v3", "structured_output", table) is False
 
-    def test_capability_table_loads_with_missing_file(self, monkeypatch):
-        """Force every search path to miss; loader should warn and use defaults."""
-        monkeypatch.setattr(agents_base, "_MODEL_CAPABILITIES_SEARCH_PATHS", ())
-        monkeypatch.setattr(agents_base, "_model_capabilities_cache", None)
-
-        table = agents_base._load_model_capabilities(force_reload=True)
-
-        # Should be the hardcoded fallback.
+    def test_capability_table_falls_back_when_file_is_missing(self):
+        """Pointing at a non-existent path should fall back to the built-in defaults."""
+        table = _load_model_capabilities("/nonexistent/path/agent_model_capabilities.yml", force_reload=True)
         assert table is agents_base._DEFAULT_MODEL_CAPABILITIES
         assert _capability_for_model("deepseek-r1", "structured_output", table) is False
         assert _capability_for_model("gpt-4o", "structured_output", table) is True
 
-        # Reset cache so subsequent tests pick up the real file again.
-        monkeypatch.setattr(agents_base, "_model_capabilities_cache", None)
+    def test_capability_table_falls_back_when_path_is_unset(self):
+        """A None or non-string path (e.g. unset config option) yields the built-in defaults."""
+        assert _load_model_capabilities(None) is agents_base._DEFAULT_MODEL_CAPABILITIES
+        assert _load_model_capabilities("") is agents_base._DEFAULT_MODEL_CAPABILITIES
 
 
 @pytestmark_live_llm
