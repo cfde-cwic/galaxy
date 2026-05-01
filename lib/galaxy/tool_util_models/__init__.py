@@ -11,7 +11,6 @@ from typing import (
     List,
     Optional,
     Set,
-    Tuple,
     Union,
 )
 
@@ -72,12 +71,6 @@ def normalize_dict(values, keys: List[str]):
 # Tool ID: lowercase, leading letter, letters/digits/'_'/'-'.
 _TOOL_ID_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 TOOL_ID_PATTERN = r"^[a-z][a-z0-9_-]*$"
-
-# Recognized container reference shapes. Kept module-level so future
-# admin-configurable code can extend them in place. Docker-Hub-style image
-# references allow optional registry path segments and an optional tag.
-CONTAINER_PREFIXES: Tuple[str, ...] = ("quay.io/biocontainers/", "docker://", "oras://")
-DOCKER_IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9._-]+)*(:[\w][\w.-]*)?$")
 
 # Templated ecmascript inside `shell_command` / `configfiles[*].content`.
 # Pull every $(<expr>) and extract the *leading* 'inputs.<name>' identifier.
@@ -239,18 +232,10 @@ class UserToolSource(_DynamicToolSourceBase):
 
     @field_validator("container", mode="after")
     @classmethod
-    def _check_container_shape(cls, value: str) -> str:
+    def _reject_blank_container(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("container must not be empty")
-        stripped = value.strip()
-        if stripped.startswith(CONTAINER_PREFIXES):
-            return value
-        if DOCKER_IMAGE_RE.match(stripped):
-            return value
-        raise ValueError(
-            f"container '{value}' does not match a recognized shape "
-            "(quay.io/biocontainers/..., docker://..., oras://..., or <image>[:<tag>])"
-        )
+        return value
 
 
 class YamlToolSource(_DynamicToolSourceBase):

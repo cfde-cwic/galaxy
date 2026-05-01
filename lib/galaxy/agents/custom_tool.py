@@ -18,6 +18,7 @@ from pydantic_ai.exceptions import (
 )
 
 from galaxy.schema.agents import ConfidenceLevel
+from galaxy.tool_util.lint import lint_user_tool_source
 from galaxy.tool_util_models import (
     format_validation_errors,
     UserToolSource,
@@ -117,6 +118,23 @@ class CustomToolAgent(BaseGalaxyAgent):
                     result=result,
                     query=query,
                     error="invalid_structured_output",
+                )
+
+            lint_errors = lint_user_tool_source(tool)
+            if lint_errors:
+                log.debug("CustomToolAgent lint failure: %s", lint_errors)
+                bullet_text = "\n".join(f"- {issue}" for issue in lint_errors)
+                return self._build_response(
+                    content=(
+                        "The model produced a tool definition, but it has problems "
+                        "that need to be fixed before it can be saved:\n\n"
+                        f"{bullet_text}"
+                    ),
+                    confidence=ConfidenceLevel.LOW,
+                    method="lint_error",
+                    query=query,
+                    error="lint_failed",
+                    agent_data={"lint_errors": lint_errors},
                 )
 
             tool_dict = tool.model_dump(by_alias=True, exclude_none=True)

@@ -1,10 +1,13 @@
 """Direct tests for the semantic validators on ``UserToolSource``.
 
 These tests construct ``UserToolSource`` payloads in-memory and assert that
-each rule (id pattern, container shape, citation shape, undeclared
-``inputs.<name>`` references in ``shell_command`` / ``configfiles``,
-output discovery requirements, blank required fields) raises a
-``ValidationError`` whose distilled output identifies the offending field.
+each rule (id pattern, citation shape, undeclared ``inputs.<name>``
+references in ``shell_command`` / ``configfiles``, output discovery
+requirements, blank required fields) raises a ``ValidationError`` whose
+distilled output identifies the offending field.
+
+Container *shape* is enforced by the lint framework, not pydantic — see
+``test_container_shape_lint.py``.
 """
 
 from copy import deepcopy
@@ -67,26 +70,11 @@ def test_invalid_id_rejected(bad_id):
     _assert_error_contains(info.value, "String should match pattern")
 
 
-@pytest.mark.parametrize("bad_container", ["", "   ", "definitely not a container", "foo bar baz"])
-def test_invalid_container_rejected(bad_container):
+@pytest.mark.parametrize("bad_container", ["", "   "])
+def test_blank_container_rejected(bad_container):
     with pytest.raises(ValidationError) as info:
         UserToolSource.model_validate(_doc(container=bad_container))
-    _assert_error_contains(info.value, "container")
-
-
-@pytest.mark.parametrize(
-    "container",
-    [
-        "quay.io/biocontainers/samtools:1.17",
-        "docker://my-registry/image:tag",
-        "oras://example.org/image",
-        "busybox",
-        "ubuntu:latest",
-        "library/python:3.11-slim",
-    ],
-)
-def test_valid_container_shapes(container):
-    UserToolSource.model_validate(_doc(container=container))
+    _assert_error_contains(info.value, "container must not be empty")
 
 
 def test_blank_name_rejected():
