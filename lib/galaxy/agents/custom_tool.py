@@ -10,6 +10,7 @@ from typing import (
 )
 
 import yaml
+from pydantic import ValidationError
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import (
     ModelHTTPError,
@@ -17,7 +18,10 @@ from pydantic_ai.exceptions import (
 )
 
 from galaxy.schema.agents import ConfidenceLevel
-from galaxy.tool_util_models import UserToolSource
+from galaxy.tool_util_models import (
+    format_validation_errors,
+    UserToolSource,
+)
 from .base import (
     ActionSuggestion,
     ActionType,
@@ -30,6 +34,22 @@ from .base import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _find_validation_error(exc: BaseException) -> Optional[ValidationError]:
+    """Walk the exception cause chain looking for a pydantic ValidationError.
+
+    pydantic-ai wraps validation failures inside UnexpectedModelBehavior after
+    exhausting retries; the original ValidationError surfaces via __cause__.
+    """
+    seen: set[int] = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ValidationError):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
 
 
 class CustomToolAgent(BaseGalaxyAgent):
@@ -179,6 +199,27 @@ The tool is ready to be saved and used in Galaxy."""
                 )
             raise
         except UnexpectedModelBehavior as e:
+            pydantic_error = _find_validation_error(e)
+            if pydantic_error is not None:
+                # Expected path: the user is editing the prompt iteratively and
+                # the LLM produced a tool definition that fails one of the
+                # UserToolSource validators. Surface the friendly bullet list
+                # rather than a generic "model misbehaved" message.
+                bullets = format_validation_errors(pydantic_error)
+                log.debug("CustomToolAgent validation failure: %s", bullets)
+                bullet_text = "\n".join(f"- {issue}" for issue in bullets)
+                return self._build_response(
+                    content=(
+                        "The model produced a tool definition, but it has problems "
+                        "that need to be fixed before it can be saved:\n\n"
+                        f"{bullet_text}"
+                    ),
+                    confidence=ConfidenceLevel.LOW,
+                    method="validation_error",
+                    query=query,
+                    error="validation_failed",
+                    agent_data={"validation_errors": bullets},
+                )
             log.warning(f"Model failed to produce valid tool definition: {e}")
             model = self._get_agent_config("model", "unknown")
             return self._build_response(
