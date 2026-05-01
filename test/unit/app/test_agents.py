@@ -30,7 +30,9 @@ import pytest
 
 # Skip entire module if pydantic_ai is not installed
 pydantic_ai = pytest.importorskip("pydantic_ai")
+from pydantic import ValidationError
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -50,6 +52,7 @@ from galaxy.agents import (
     ToolRecommendationAgent,
 )
 from galaxy.agents.base import truncate_message_history
+from galaxy.agents.custom_tool import CritiqueReport
 from galaxy.agents.registry import build_default_registry
 from galaxy.agents.tools import SimplifiedToolRecommendationResult
 
@@ -1098,6 +1101,244 @@ class TestAgentUnitLiveLLM:
         assert response.metadata["method"] == "simple_template"
         assert "tool_id" in response.metadata
         assert "tool_yaml" in response.metadata
+
+
+def _validation_error_for(payload: dict) -> ValidationError:
+    """Trigger a real ValidationError from UserToolSource for use in mocks.
+
+    Returning a real ValidationError (rather than a hand-constructed one)
+    keeps the tests honest about what pydantic-ai actually surfaces when
+    the producer's structured output fails validation.
+    """
+    try:
+        UserToolSource(**payload)
+    except ValidationError as e:
+        return e
+    raise AssertionError(f"Expected ValidationError for payload: {payload}")
+
+
+def _producer_validation_failure() -> UnexpectedModelBehavior:
+    """Build the exception pydantic-ai raises when output validation fails.
+
+    With ``output_retries=0`` on the producer Agent, pydantic-ai wraps the
+    underlying ``ValidationError`` in ``UnexpectedModelBehavior`` and
+    bubbles it up via ``__cause__`` -- which is what ``_find_validation_error``
+    walks.
+    """
+    ve = _validation_error_for(
+        {
+            "class": "GalaxyUserTool",
+            "id": "Bad-ID-Caps",  # capital letters fail the model regex
+            "name": "Bad",
+            "version": "0.1.0",
+            "container": "ubuntu:latest",
+            "shell_command": "echo hi",
+            "inputs": [],
+            "outputs": [],
+        }
+    )
+    exc = UnexpectedModelBehavior("output validation failed")
+    exc.__cause__ = ve
+    return exc
+
+
+def _valid_tool(name: str = "Echo Tool") -> UserToolSource:
+    return UserToolSource(
+        **{
+            "class": "GalaxyUserTool",
+            "id": "echo-tool",
+            "name": name,
+            "version": "0.1.0",
+            "description": "echo input to a file",
+            "container": "quay.io/biocontainers/python:3.13",
+            "shell_command": "echo '$(inputs.message)' > out.txt",
+            "inputs": [
+                {"name": "message", "type": "text", "value": "hi"},
+            ],
+            "outputs": [
+                {"name": "out", "type": "data", "format": "txt", "from_work_dir": "out.txt"},
+            ],
+            "citations": [{"type": "doi", "content": "10.1093/bioinformatics/btx123"}],
+        }
+    )
+
+
+def _mock_run_result(tool: UserToolSource) -> mock.Mock:
+    result = mock.Mock()
+    result.output = tool
+    return result
+
+
+class TestCustomToolAgentReflection:
+    """Tests for CustomToolAgent's validator-retry and quality-critic loops.
+
+    With #22615's integrated validation, pydantic-ai wraps any UserToolSource
+    ValidationError in UnexpectedModelBehavior; the agent's reflection logic
+    surfaces those as a structured retry prompt or low-confidence response.
+    """
+
+    def setup_method(self):
+        self.mock_config = mock.Mock()
+        self.mock_config.ai_api_key = "test-key"
+        self.mock_config.ai_model = "gpt-4o"
+        self.mock_config.ai_api_base_url = "http://localhost:4000/v1/"
+        self.mock_config.inference_services = None
+
+        self.mock_user = mock.Mock()
+        self.mock_user.id = 1
+        self.mock_user.username = "test_user"
+
+        self.mock_trans = mock.Mock()
+        self.mock_trans.app.config = self.mock_config
+        self.mock_trans.user = self.mock_user
+
+        self.deps = GalaxyAgentDependencies(
+            trans=self.mock_trans,
+            user=self.mock_user,
+            config=self.mock_config,
+            get_agent=agent_registry.get_agent,
+            job_manager=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_validator_retry_recovers_when_second_attempt_passes(self):
+        """First call fails validation, retry returns a valid tool -> success."""
+        agent = CustomToolAgent(self.deps)
+
+        with mock.patch.object(
+            agent.agent,
+            "run",
+            side_effect=[
+                _producer_validation_failure(),
+                _mock_run_result(_valid_tool()),
+            ],
+        ) as mock_run:
+            response = await agent.process("Create a tool")
+
+        assert mock_run.call_count == 2
+        assert response.confidence == ConfidenceLevel.HIGH
+        assert response.metadata.get("tool_id") == "echo-tool"
+        # Retry prompt embeds the formatted error list as guidance.
+        retry_prompt = mock_run.call_args_list[1][0][0]
+        assert "previous attempt" in retry_prompt.lower()
+
+    @pytest.mark.asyncio
+    async def test_validator_retry_exhausted_returns_validation_failure(self):
+        """Both producer calls fail validation -> low-confidence validation_failed."""
+        agent = CustomToolAgent(self.deps)
+
+        with mock.patch.object(
+            agent.agent,
+            "run",
+            side_effect=[
+                _producer_validation_failure(),
+                _producer_validation_failure(),
+            ],
+        ) as mock_run:
+            response = await agent.process("Create a tool")
+
+        assert mock_run.call_count == 2
+        assert response.confidence == ConfidenceLevel.LOW
+        assert response.metadata.get("error") == "validation_failed"
+
+    @pytest.mark.asyncio
+    async def test_validator_retry_disabled_short_circuits(self):
+        """With validator_retry_enabled=False, producer is called exactly once."""
+        self.mock_config.inference_services = {
+            "custom_tool": {"validator_retry_enabled": False},
+        }
+        agent = CustomToolAgent(self.deps)
+
+        with mock.patch.object(
+            agent.agent,
+            "run",
+            side_effect=[_producer_validation_failure()],
+        ) as mock_run:
+            response = await agent.process("Create a tool")
+
+        assert mock_run.call_count == 1
+        assert response.confidence == ConfidenceLevel.LOW
+        assert response.metadata.get("error") == "validation_failed"
+
+    @pytest.mark.asyncio
+    async def test_critic_disabled_by_default_skips_critic_call(self):
+        """Default config: producer succeeds, critic is never invoked."""
+        agent = CustomToolAgent(self.deps)
+
+        with mock.patch.object(agent.agent, "run", return_value=_mock_run_result(_valid_tool())):
+            with mock.patch.object(agent, "_run_critic", new_callable=mock.AsyncMock) as mock_critic:
+                response = await agent.process("Create a tool")
+
+        mock_critic.assert_not_called()
+        assert response.confidence == ConfidenceLevel.HIGH
+
+    @pytest.mark.asyncio
+    async def test_critic_enabled_no_refine_when_should_refine_false(self):
+        """Critic enabled but says nothing significant -> producer not re-rolled."""
+        self.mock_config.inference_services = {
+            "custom_tool": {"quality_critic_enabled": True},
+        }
+        agent = CustomToolAgent(self.deps)
+        no_issues = CritiqueReport(should_refine=False, summary="looks fine")
+
+        with mock.patch.object(agent.agent, "run", return_value=_mock_run_result(_valid_tool())) as mock_run:
+            with mock.patch.object(agent, "_run_critic", new_callable=mock.AsyncMock, return_value=no_issues):
+                response = await agent.process("Create a tool")
+
+        assert mock_run.call_count == 1
+        assert response.confidence == ConfidenceLevel.HIGH
+
+    @pytest.mark.asyncio
+    async def test_critic_enabled_refine_replaces_tool(self):
+        """Critic flags refine -> producer is re-rolled and refined tool is used."""
+        self.mock_config.inference_services = {
+            "custom_tool": {"quality_critic_enabled": True},
+        }
+        agent = CustomToolAgent(self.deps)
+        original = _valid_tool(name="Echo Tool")
+        refined = _valid_tool(name="Echo Tool (refined)")
+        critique = CritiqueReport(
+            clarity_issues=["help text is terse"],
+            should_refine=True,
+            summary="needs clearer help",
+        )
+
+        with mock.patch.object(
+            agent.agent,
+            "run",
+            side_effect=[_mock_run_result(original), _mock_run_result(refined)],
+        ) as mock_run:
+            with mock.patch.object(agent, "_run_critic", new_callable=mock.AsyncMock, return_value=critique):
+                response = await agent.process("Create a tool")
+
+        assert mock_run.call_count == 2
+        assert response.confidence == ConfidenceLevel.HIGH
+        assert "refined" in response.metadata.get("tool_yaml", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_critic_refine_keeps_original_when_refinement_breaks_validation(self):
+        """If refinement fails validation, the original (valid) tool is preserved."""
+        self.mock_config.inference_services = {
+            "custom_tool": {"quality_critic_enabled": True},
+        }
+        agent = CustomToolAgent(self.deps)
+        original = _valid_tool(name="Echo Tool")
+        critique = CritiqueReport(
+            idiomaticity_issues=["use a tighter container"],
+            should_refine=True,
+            summary="container is too broad",
+        )
+
+        with mock.patch.object(
+            agent.agent,
+            "run",
+            side_effect=[_mock_run_result(original), _producer_validation_failure()],
+        ):
+            with mock.patch.object(agent, "_run_critic", new_callable=mock.AsyncMock, return_value=critique):
+                response = await agent.process("Create a tool")
+
+        assert response.confidence == ConfidenceLevel.HIGH
+        assert response.metadata.get("tool_id") == "echo-tool"
 
 
 @pytestmark_live_llm
