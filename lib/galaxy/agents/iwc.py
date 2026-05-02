@@ -13,10 +13,7 @@ from typing import (
     Optional,
 )
 
-from cachetools import (
-    cached,
-    TTLCache,
-)
+from cachetools import TTLCache
 
 from galaxy.util import requests
 
@@ -24,6 +21,7 @@ log = logging.getLogger(__name__)
 
 IWC_MANIFEST_URL = "https://iwc.galaxyproject.org/workflow_manifest.json"
 CACHE_TTL_SECONDS = 60 * 60  # one hour
+_CACHE_KEY = "manifest"
 
 _manifest_cache: TTLCache = TTLCache(maxsize=1, ttl=CACHE_TTL_SECONDS)
 _manifest_cache_lock = Lock()
@@ -35,15 +33,24 @@ def clear_manifest_cache() -> None:
         _manifest_cache.clear()
 
 
-@cached(cache=_manifest_cache, lock=_manifest_cache_lock)
 def fetch_manifest(timeout: float = 30.0) -> list[dict[str, Any]]:
-    """Fetch the IWC manifest, returning a cached copy when fresh."""
-    response = requests.get(IWC_MANIFEST_URL, timeout=timeout)
-    response.raise_for_status()
-    manifest = response.json()
-    if not isinstance(manifest, list):
-        raise ValueError(f"IWC manifest at {IWC_MANIFEST_URL} did not return a JSON array")
-    return manifest
+    """Fetch the IWC manifest, returning a cached copy when fresh.
+
+    The lock is held across the network fetch so concurrent cold misses
+    share a single in-flight request rather than each issuing their own.
+    """
+    with _manifest_cache_lock:
+        cached = _manifest_cache.get(_CACHE_KEY)
+        if cached is not None:
+            return cached
+
+        response = requests.get(IWC_MANIFEST_URL, timeout=timeout)
+        response.raise_for_status()
+        manifest = response.json()
+        if not isinstance(manifest, list):
+            raise ValueError(f"IWC manifest at {IWC_MANIFEST_URL} did not return a JSON array")
+        _manifest_cache[_CACHE_KEY] = manifest
+        return manifest
 
 
 def all_workflows(manifest: list[dict[str, Any]]) -> list[dict[str, Any]]:
