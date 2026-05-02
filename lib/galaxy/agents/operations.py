@@ -873,19 +873,10 @@ class AgentOperationsManager:
 
     # ==================== IWC ====================
 
-    def get_iwc_workflows(self) -> dict[str, Any]:
-        """Return all workflows from the IWC manifest as enriched entries."""
-        manifest = iwc.fetch_manifest()
-        workflows = iwc.all_workflows(manifest)
-        return {
-            "workflows": [iwc.enrich_workflow(wf) for wf in workflows],
-            "count": len(workflows),
-        }
-
-    def search_iwc_workflows(self, query: str) -> dict[str, Any]:
-        """Search the IWC manifest by token overlap against name/description/tags/tools."""
+    def search_iwc_workflows(self, query: str, limit: int = 10) -> dict[str, Any]:
+        """Rank IWC manifest workflows by token overlap against name, description, tags, and tools."""
         workflows = iwc.all_workflows(iwc.fetch_manifest())
-        results = iwc.search_workflows(workflows, query)
+        results = iwc.search_workflows(workflows, query, limit=limit)
         return {
             "query": query,
             "workflows": results,
@@ -901,16 +892,6 @@ class AgentOperationsManager:
         raise ValueError(
             f"IWC workflow with trsID {trs_id!r} not found. Use search_iwc_workflows() to discover trsIDs."
         )
-
-    def recommend_iwc_workflows(self, intent: str, limit: int = 5) -> dict[str, Any]:
-        """Rank IWC workflows by token overlap against a natural-language intent."""
-        workflows = iwc.all_workflows(iwc.fetch_manifest())
-        results = iwc.search_workflows(workflows, intent, limit=limit)
-        return {
-            "intent": intent,
-            "recommendations": results,
-            "count": len(results),
-        }
 
     def import_workflow_from_iwc(self, trs_id: str) -> dict[str, Any]:
         """Import an IWC workflow into the user's stored workflows.

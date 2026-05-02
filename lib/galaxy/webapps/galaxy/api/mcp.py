@@ -951,70 +951,53 @@ def get_mcp_app(gx_app):
     # ==================== IWC ====================
 
     @mcp.tool()
-    def get_iwc_workflows(api_key: str, ctx: MCPContext) -> dict[str, Any]:
-        """Fetch all workflows from the IWC (Intergalactic Workflows Commission) manifest.
+    def search_iwc_workflows(query: str, api_key: str, ctx: MCPContext, limit: int = 10) -> dict[str, Any]:
+        """Find IWC (Intergalactic Workflows Commission) workflows matching a query or analysis intent.
 
         IWC hosts curated, best-practice workflows for common bioinformatics
-        analyses. This returns the full enriched manifest. For a smaller,
-        query-targeted result set use search_iwc_workflows() or
-        recommend_iwc_workflows().
-
-        Returns:
-            Dict with 'workflows' (list of enriched entries) and 'count'. Each
-            workflow entry includes:
-            - trsID: Unique identifier for importing
-            - name, description, tags
-            - readme_summary: First ~300 chars of documentation
-            - step_count: Number of workflow steps (complexity indicator)
-            - authors: List of {name, orcid}
-            - categories: High-level category classifications
-            - tools_used: Tool names referenced by the workflow
-
-        NEXT STEPS:
-        - Get full details for a workflow: get_iwc_workflow_details(trs_id)
-        - Import to Galaxy: import_workflow_from_iwc(trs_id)
-        """
-        with _mcp_error_handler("get_iwc_workflows"):
-            ops_manager = get_operations_manager(api_key, ctx)
-            return ops_manager.get_iwc_workflows()
-
-    @mcp.tool()
-    def search_iwc_workflows(query: str, api_key: str, ctx: MCPContext) -> dict[str, Any]:
-        """Search the IWC manifest for workflows matching a query.
-
-        Ranks workflows by token overlap against name, description, tags,
-        readme, and constituent tool names. Use this when you have specific
-        keywords; for natural-language analysis intent, prefer
-        recommend_iwc_workflows().
+        analyses. Ranks workflows by token overlap against name, description,
+        tags, readme, and constituent tool names. Works for both keyword
+        queries ("rnaseq") and natural-language intent
+        ("I have paired-end RNA-seq and want differential expression").
 
         RECOMMENDED WORKFLOW:
         1. Search for workflows matching your analysis need
-        2. Review the results -- check step_count for complexity, readme_summary
-           for details
-        3. Call get_iwc_workflow_details(trs_id) for full information
+        2. Review the ranked results -- check step_count for complexity,
+           readme_summary for details, match_score for ranking confidence
+        3. Call get_iwc_workflow_details(trs_id) for full documentation
         4. Import with import_workflow_from_iwc(trs_id)
         5. Run with invoke_workflow()
 
         Args:
-            query: Search query (case-insensitive). Matches against:
-                - Workflow name (e.g., "RNA-seq")
-                - Description / annotation
-                - Tags (e.g., "assembly", "transcriptomics")
-                - Readme text and tool names
+            query: Search query or analysis intent. Case-insensitive. Matches
+                against workflow name, description, tags, readme text, and the
+                names of tools the workflow uses. Examples:
+                - "rnaseq"
+                - "variant calling from whole exome sequencing"
+                - "assemble a bacterial genome from nanopore reads"
+            limit: Maximum number of results to return (default 10).
 
         Returns:
             Dict with 'query', 'workflows' (ranked, enriched entries), and
-            'count'. Each workflow entry has the same shape as
-            get_iwc_workflows plus a `match_score` field.
+            'count'. Each workflow entry includes:
+            - trsID: Unique identifier for importing
+            - name, description, tags, categories
+            - readme_summary: First ~300 chars of documentation
+            - step_count: Number of workflow steps (complexity indicator)
+            - authors: List of {name, orcid}
+            - tools_used: Tool names referenced by the workflow
+            - match_score: Token-overlap rank score
+
+        TIP: Be specific. "RNA-seq" matches many workflows, but "differential
+        expression RNA-seq human samples" ranks them more usefully.
 
         NEXT STEPS:
         - Get full details: get_iwc_workflow_details(trs_id)
         - Import to Galaxy: import_workflow_from_iwc(trs_id)
-        - For natural-language search: recommend_iwc_workflows("I have RNA-seq...")
         """
         with _mcp_error_handler("search_iwc_workflows"):
             ops_manager = get_operations_manager(api_key, ctx)
-            return ops_manager.search_iwc_workflows(query)
+            return ops_manager.search_iwc_workflows(query, limit)
 
     @mcp.tool()
     def get_iwc_workflow_details(trs_id: str, api_key: str, ctx: MCPContext) -> dict[str, Any]:
@@ -1024,7 +1007,7 @@ def get_mcp_app(gx_app):
         complexity before deciding to import it into your Galaxy instance.
 
         RECOMMENDED WORKFLOW:
-        1. Search workflows with search_iwc_workflows() or recommend_iwc_workflows()
+        1. Find candidates with search_iwc_workflows()
         2. Call this function with the trsID to get full details
         3. Review the readme and inputs to ensure it fits your needs
         4. Import with import_workflow_from_iwc(trs_id)
@@ -1056,43 +1039,6 @@ def get_mcp_app(gx_app):
             return ops_manager.get_iwc_workflow_details(trs_id)
 
     @mcp.tool()
-    def recommend_iwc_workflows(intent: str, api_key: str, ctx: MCPContext, limit: int = 5) -> dict[str, Any]:
-        """Find IWC workflows matching a natural-language analysis goal.
-
-        Use this when you have a general analysis goal (rather than specific
-        keywords) and want the best-matching workflows. Ranks across names,
-        descriptions, readmes, tags, and tool names.
-
-        RECOMMENDED WORKFLOW:
-        1. Describe your analysis goal in natural language
-        2. Review ranked recommendations and their match_score values
-        3. Get details for promising workflows: get_iwc_workflow_details(trs_id)
-        4. Import the best match: import_workflow_from_iwc(trs_id)
-
-        Args:
-            intent: Natural language description of the analysis goal. Examples:
-                - "I have paired-end RNA-seq data and want differential expression"
-                - "Assemble a bacterial genome from nanopore reads"
-                - "Variant calling from whole exome sequencing data"
-                - "Quality control for Illumina sequencing data"
-            limit: Maximum number of recommendations to return (default 5).
-
-        Returns:
-            Dict with 'intent', 'recommendations' (each in the enriched workflow
-            shape with a match_score field), and 'count'.
-
-        TIP: Be specific. "RNA-seq" matches many workflows, but "differential
-        expression RNA-seq human samples" ranks them more usefully.
-
-        NEXT STEPS:
-        - Get full details: get_iwc_workflow_details(trs_id)
-        - Import top choice: import_workflow_from_iwc(trs_id)
-        """
-        with _mcp_error_handler("recommend_iwc_workflows"):
-            ops_manager = get_operations_manager(api_key, ctx)
-            return ops_manager.recommend_iwc_workflows(intent, limit)
-
-    @mcp.tool()
     def import_workflow_from_iwc(trs_id: str, api_key: str, ctx: MCPContext) -> dict[str, Any]:
         """Import an IWC workflow into the user's stored workflows.
 
@@ -1102,7 +1048,7 @@ def get_mcp_app(gx_app):
         the same shape any other imported workflow has.
 
         RECOMMENDED WORKFLOW:
-        1. Find the workflow with search_iwc_workflows() or recommend_iwc_workflows()
+        1. Find the workflow with search_iwc_workflows()
         2. Inspect with get_iwc_workflow_details(trs_id) to confirm it's the right one
         3. Import with this tool, then run with invoke_workflow()
 
