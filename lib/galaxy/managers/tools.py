@@ -9,8 +9,6 @@ from typing import (
 from uuid import UUID
 
 from sqlalchemy import (
-    exists,
-    false,
     select,
     sql,
     true,
@@ -82,15 +80,7 @@ class DynamicToolManager(ModelManager[DynamicTool]):
     model_class = DynamicTool
 
     def ensure_can_use_unprivileged_tool(self, user: model.User):
-        stmt = select(
-            exists().where(
-                model.UserRoleAssociation.user_id == user.id,
-                model.UserRoleAssociation.role_id == model.Role.id,
-                model.Role.type == model.Role.types.USER_TOOL_EXECUTE,
-                model.Role.deleted == false(),
-            )
-        )
-        if not self.session().execute(stmt).scalar():
+        if not any(role.type == model.Role.types.USER_TOOL_EXECUTE and not role.deleted for role in user.all_roles()):
             raise exceptions.InsufficientPermissionsException("User is not allowed to run unprivileged tools")
 
     def get_tool_by_id_or_uuid(self, id_or_uuid: Union[int, str]) -> Union[DynamicTool, None]:

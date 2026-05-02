@@ -29,6 +29,14 @@ class TestUnprivilegedToolsApi(ApiTestCase, TestsTools):
             assert dynamic_tool["uuid"], "Dynamic tool UUID not found in response"
             assert dynamic_tool["representation"]["name"] == TOOL_WITH_SHELL_COMMAND["name"]
 
+    def test_create_unprivileged_with_group_inherited_role(self):
+        # Regression: USER_TOOL_EXECUTE granted via group membership must also allow access,
+        # not only direct UserRoleAssociation.
+        with self.dataset_populator.user_tool_execute_permissions_via_group():
+            dynamic_tool = self.dataset_populator.create_unprivileged_tool(UserToolSource(**TOOL_WITH_SHELL_COMMAND))
+            assert dynamic_tool["uuid"], "Dynamic tool UUID not found in response"
+            assert dynamic_tool["representation"]["name"] == TOOL_WITH_SHELL_COMMAND["name"]
+
     def test_list_unprivileged(self):
         with self.dataset_populator.user_tool_execute_permissions():
             dynamic_tool = self.dataset_populator.create_unprivileged_tool(UserToolSource(**TOOL_WITH_SHELL_COMMAND))
