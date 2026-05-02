@@ -7236,7 +7236,13 @@ export interface components {
          * @description Types of actions agents can suggest.
          * @enum {string}
          */
-        ActionType: "tool_run" | "save_tool" | "contact_support" | "view_external" | "documentation";
+        ActionType:
+            | "tool_run"
+            | "save_tool"
+            | "contact_support"
+            | "view_external"
+            | "documentation"
+            | "workflow_import";
         /** AddInputAction */
         AddInputAction: {
             /**
