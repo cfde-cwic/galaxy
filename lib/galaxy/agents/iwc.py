@@ -1,18 +1,21 @@
 """IWC (Intergalactic Workflows Commission) manifest fetching and search helpers.
 
-The previous attempt at IWC integration kept its manifest cache on
-``AgentOperationsManager``, which is instantiated per request, so the cache
-never hit. Putting the cache at module scope keeps it shared across requests
-within a worker process.
+Manifest fetches go through a process-wide TTL cache so the per-request
+``AgentOperationsManager`` instances all share the same hit. Pre-warming
+the cache via celery beat is a reasonable follow-up.
 """
 
 import logging
 import re
-import threading
-import time
+from threading import Lock
 from typing import (
     Any,
     Optional,
+)
+
+from cachetools import (
+    cached,
+    TTLCache,
 )
 
 from galaxy.util import requests
@@ -22,35 +25,25 @@ log = logging.getLogger(__name__)
 IWC_MANIFEST_URL = "https://iwc.galaxyproject.org/workflow_manifest.json"
 CACHE_TTL_SECONDS = 60 * 60  # one hour
 
-_cache_lock = threading.Lock()
-_cached_manifest: Optional[list[dict[str, Any]]] = None
-_cached_at: float = 0.0
+_manifest_cache: TTLCache = TTLCache(maxsize=1, ttl=CACHE_TTL_SECONDS)
+_manifest_cache_lock = Lock()
 
 
 def clear_manifest_cache() -> None:
     """Reset the manifest cache. Tests use this; production normally won't."""
-    global _cached_manifest, _cached_at
-    with _cache_lock:
-        _cached_manifest = None
-        _cached_at = 0.0
+    with _manifest_cache_lock:
+        _manifest_cache.clear()
 
 
+@cached(cache=_manifest_cache, lock=_manifest_cache_lock)
 def fetch_manifest(timeout: float = 30.0) -> list[dict[str, Any]]:
     """Fetch the IWC manifest, returning a cached copy when fresh."""
-    global _cached_manifest, _cached_at
-    with _cache_lock:
-        now = time.monotonic()
-        if _cached_manifest is not None and (now - _cached_at) < CACHE_TTL_SECONDS:
-            return _cached_manifest
-
-        response = requests.get(IWC_MANIFEST_URL, timeout=timeout)
-        response.raise_for_status()
-        manifest = response.json()
-        if not isinstance(manifest, list):
-            raise ValueError(f"IWC manifest at {IWC_MANIFEST_URL} did not return a JSON array")
-        _cached_manifest = manifest
-        _cached_at = now
-        return manifest
+    response = requests.get(IWC_MANIFEST_URL, timeout=timeout)
+    response.raise_for_status()
+    manifest = response.json()
+    if not isinstance(manifest, list):
+        raise ValueError(f"IWC manifest at {IWC_MANIFEST_URL} did not return a JSON array")
+    return manifest
 
 
 def all_workflows(manifest: list[dict[str, Any]]) -> list[dict[str, Any]]:
