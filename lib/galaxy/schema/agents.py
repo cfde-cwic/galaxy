@@ -31,6 +31,7 @@ class ActionType(str, Enum):
     CONTACT_SUPPORT = "contact_support"
     VIEW_EXTERNAL = "view_external"
     DOCUMENTATION = "documentation"
+    WORKFLOW_IMPORT = "workflow_import"
 
 
 class ActionSuggestion(BaseModel):
@@ -54,6 +55,9 @@ class ActionSuggestion(BaseModel):
         elif self.action_type == ActionType.VIEW_EXTERNAL:
             if not self.parameters.get("url"):
                 raise ValueError("VIEW_EXTERNAL requires 'url' parameter")
+        elif self.action_type == ActionType.WORKFLOW_IMPORT:
+            if not self.parameters.get("trs_id"):
+                raise ValueError("WORKFLOW_IMPORT requires 'trs_id' parameter")
         return self
 
 

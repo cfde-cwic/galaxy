@@ -47,9 +47,11 @@ from galaxy.agents import (
     GalaxyAgentDependencies,
     HistoryAgent,
     QueryRouterAgent,
+    ToolRecommendationAgent,
 )
 from galaxy.agents.base import truncate_message_history
 from galaxy.agents.registry import build_default_registry
+from galaxy.agents.tools import SimplifiedToolRecommendationResult
 
 agent_registry = build_default_registry()
 from galaxy.agents import base as agents_base
@@ -901,6 +903,132 @@ class TestAgentUnitMocked:
         """A None or non-string path (e.g. unset config option) yields the built-in defaults."""
         assert _load_model_capabilities(None) is agents_base._DEFAULT_MODEL_CAPABILITIES
         assert _load_model_capabilities("") is agents_base._DEFAULT_MODEL_CAPABILITIES
+
+    # ---- ToolRecommendationAgent: workflow recommendation surface ----
+
+    def _make_tool_rec_agent(self) -> ToolRecommendationAgent:
+        # Toolbox is not exercised by the rendering / suggestion helpers.
+        self.deps.toolbox = None
+        return ToolRecommendationAgent(self.deps)
+
+    def test_tool_rec_creates_workflow_import_suggestion(self):
+        agent = self._make_tool_rec_agent()
+        recommendation = SimplifiedToolRecommendationResult(
+            primary_tools=[],
+            recommended_workflows=[
+                {
+                    "trsID": "#workflow/github.com/iwc-workflows/rna-seq/main",
+                    "name": "RNA-seq",
+                    "description": "RNA-seq end-to-end",
+                    "step_count": 8,
+                    "tools_used": ["fastqc", "hisat2", "featurecounts"],
+                }
+            ],
+            confidence="high",
+            reasoning="Multi-step analysis maps to a workflow.",
+        )
+
+        suggestions = agent._create_suggestions(recommendation)
+
+        assert len(suggestions) == 1
+        suggestion = suggestions[0]
+        assert suggestion.action_type.value == "workflow_import"
+        assert suggestion.parameters["trs_id"] == "#workflow/github.com/iwc-workflows/rna-seq/main"
+        assert suggestion.parameters["name"] == "RNA-seq"
+        assert suggestion.priority == 1  # promoted when no tool comes back
+
+    def test_tool_rec_workflow_suggestion_demoted_when_tool_present(self):
+        agent = self._make_tool_rec_agent()
+        # Stub _verify_tool_exists so the tool path produces a TOOL_RUN.
+        with mock.patch.object(agent, "_verify_tool_exists", return_value=True):
+            recommendation = SimplifiedToolRecommendationResult(
+                primary_tools=[{"id": "samtools_sort", "name": "Samtools Sort"}],
+                recommended_workflows=[{"trsID": "#workflow/x/y/z", "name": "Some pipeline", "step_count": 4}],
+                confidence="medium",
+                reasoning="both",
+            )
+            suggestions = agent._create_suggestions(recommendation)
+
+        kinds = [s.action_type.value for s in suggestions]
+        assert kinds == ["tool_run", "workflow_import"]
+        # When a tool is also recommended, the workflow drops to priority 2.
+        workflow_suggestion = next(s for s in suggestions if s.action_type.value == "workflow_import")
+        assert workflow_suggestion.priority == 2
+
+    def test_tool_rec_skips_workflow_without_trs_id(self):
+        agent = self._make_tool_rec_agent()
+        recommendation = SimplifiedToolRecommendationResult(
+            primary_tools=[],
+            recommended_workflows=[{"name": "Nameless", "step_count": 3}],  # no trsID
+            confidence="medium",
+            reasoning="",
+        )
+
+        suggestions = agent._create_suggestions(recommendation)
+
+        assert suggestions == []
+
+    def test_tool_rec_format_includes_workflow_section(self):
+        agent = self._make_tool_rec_agent()
+        recommendation = SimplifiedToolRecommendationResult(
+            primary_tools=[],
+            recommended_workflows=[
+                {
+                    "trsID": "#workflow/github.com/iwc-workflows/atac/main",
+                    "name": "ATAC-seq",
+                    "description": "Peak calling pipeline",
+                    "step_count": 12,
+                    "tools_used": ["bowtie2", "macs2"],
+                    "categories": ["Epigenetics"],
+                }
+            ],
+            confidence="high",
+            reasoning="multi-step",
+        )
+
+        rendered = agent._format_recommendation_response(recommendation)
+
+        assert "Recommended IWC Workflows" in rendered
+        assert "ATAC-seq" in rendered
+        assert "#workflow/github.com/iwc-workflows/atac/main" in rendered
+        assert "Steps: 12" in rendered
+        assert "bowtie2" in rendered
+
+    @pytest.mark.asyncio
+    async def test_tool_rec_search_iwc_workflows_uses_module_helper(self):
+        agent = self._make_tool_rec_agent()
+        fake_manifest = [
+            {
+                "workflows": [
+                    {
+                        "trsID": "#workflow/github.com/iwc-workflows/rna-seq/main",
+                        "definition": {
+                            "name": "RNA-seq",
+                            "annotation": "End-to-end RNA-seq",
+                            "tags": ["rna-seq"],
+                            "steps": {"0": {"tool_id": "toolshed.example/repos/iuc/hisat2/hisat2/2.0"}},
+                        },
+                        "readme": "RNA-seq pipeline",
+                    }
+                ]
+            }
+        ]
+        from galaxy.agents import iwc
+
+        iwc.clear_manifest_cache()
+        try:
+            with patch("galaxy.agents.iwc.requests.get") as mock_get:
+                mock_get.return_value.json.return_value = fake_manifest
+                mock_get.return_value.raise_for_status.return_value = None
+
+                results = await agent.search_iwc_workflows("rna-seq", limit=5)
+        finally:
+            iwc.clear_manifest_cache()
+
+        assert len(results) == 1
+        assert results[0]["trsID"] == "#workflow/github.com/iwc-workflows/rna-seq/main"
+        assert results[0]["name"] == "RNA-seq"
+        assert "match_score" in results[0]
 
 
 @pytestmark_live_llm
