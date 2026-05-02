@@ -1,10 +1,13 @@
+from typing import (
+    Any,
+)
 from unittest.mock import patch
 
 import pytest
 
 from galaxy.agents import iwc
 
-SAMPLE_MANIFEST = [
+SAMPLE_MANIFEST: list[dict[str, Any]] = [
     {
         "workflows": [
             {

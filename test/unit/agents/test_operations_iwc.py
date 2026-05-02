@@ -1,7 +1,13 @@
 from types import SimpleNamespace
+from typing import (
+    Any,
+    cast,
+)
 from unittest.mock import patch
 
 from galaxy.agents.operations import AgentOperationsManager
+from galaxy.managers.context import ProvidesUserContext
+from galaxy.structured_app import MinimalManagerApp
 
 
 class MutatingWorkflowContentsManager:
@@ -17,7 +23,7 @@ class MutatingWorkflowContentsManager:
 
 
 def test_import_workflow_from_iwc_does_not_mutate_cached_definition():
-    definition = {
+    definition: dict[str, Any] = {
         "name": "IWC workflow with subworkflow",
         "annotation": "",
         "tags": [],
@@ -46,7 +52,7 @@ def test_import_workflow_from_iwc_does_not_mutate_cached_definition():
     ]
     app = SimpleNamespace(workflow_contents_manager=MutatingWorkflowContentsManager())
     trans = SimpleNamespace(security=SimpleNamespace(encode_id=lambda value: f"encoded-{value}"))
-    ops = AgentOperationsManager(app, trans)
+    ops = AgentOperationsManager(cast(MinimalManagerApp, app), cast(ProvidesUserContext, trans))
 
     with patch("galaxy.agents.iwc.fetch_manifest", return_value=manifest):
         result = ops.import_workflow_from_iwc("#workflow/github.com/iwc-workflows/with-subworkflow/main")
