@@ -978,6 +978,44 @@ def get_mcp_app(gx_app):
             ops_manager = get_operations_manager(api_key, ctx)
             return ops_manager.get_iwc_workflows()
 
+    @mcp.tool()
+    def search_iwc_workflows(query: str, api_key: str, ctx: MCPContext) -> dict[str, Any]:
+        """Search the IWC manifest for workflows matching a query.
+
+        Ranks workflows by token overlap against name, description, tags,
+        readme, and constituent tool names. Use this when you have specific
+        keywords; for natural-language analysis intent, prefer
+        recommend_iwc_workflows().
+
+        RECOMMENDED WORKFLOW:
+        1. Search for workflows matching your analysis need
+        2. Review the results -- check step_count for complexity, readme_summary
+           for details
+        3. Call get_iwc_workflow_details(trs_id) for full information
+        4. Import with import_workflow_from_iwc(trs_id)
+        5. Run with invoke_workflow()
+
+        Args:
+            query: Search query (case-insensitive). Matches against:
+                - Workflow name (e.g., "RNA-seq")
+                - Description / annotation
+                - Tags (e.g., "assembly", "transcriptomics")
+                - Readme text and tool names
+
+        Returns:
+            Dict with 'query', 'workflows' (ranked, enriched entries), and
+            'count'. Each workflow entry has the same shape as
+            get_iwc_workflows plus a `match_score` field.
+
+        NEXT STEPS:
+        - Get full details: get_iwc_workflow_details(trs_id)
+        - Import to Galaxy: import_workflow_from_iwc(trs_id)
+        - For natural-language search: recommend_iwc_workflows("I have RNA-seq...")
+        """
+        with _mcp_error_handler("search_iwc_workflows"):
+            ops_manager = get_operations_manager(api_key, ctx)
+            return ops_manager.search_iwc_workflows(query)
+
     mcp_app = mcp.http_app(path="/")
     mcp_app.state.mcp_server = mcp
 

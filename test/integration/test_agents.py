@@ -347,6 +347,7 @@ class TestMCPServerSmoke(IntegrationTestCase):
             "delete_user_tool",
             "run_user_tool",
             "get_iwc_workflows",
+            "search_iwc_workflows",
         }
         assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
 

@@ -880,6 +880,16 @@ class AgentOperationsManager:
             "count": len(workflows),
         }
 
+    def search_iwc_workflows(self, query: str) -> dict[str, Any]:
+        """Search the IWC manifest by token overlap against name/description/tags/tools."""
+        workflows = iwc.all_workflows(iwc.fetch_manifest())
+        results = iwc.search_workflows(workflows, query)
+        return {
+            "query": query,
+            "workflows": results,
+            "count": len(results),
+        }
+
     def get_user(self) -> dict[str, Any]:
         user = self.trans.user
 
