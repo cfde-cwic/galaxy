@@ -349,6 +349,7 @@ class TestMCPServerSmoke(IntegrationTestCase):
             "search_iwc_workflows",
             "get_iwc_workflow_details",
             "import_workflow_from_iwc",
+            "list_user_tools",
         }
         assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
 
@@ -577,3 +578,20 @@ class TestMCPServerSmoke(IntegrationTestCase):
         data = result.data
         assert "id" in data
         assert data["trsID"] == "#workflow/github.com/iwc-workflows/smoke/main"
+
+    def test_mcp_list_user_tools_empty(self):
+        """list_user_tools() returns an empty list for a user with the role and no UDTs."""
+        from fastmcp import Client
+
+        mcp_server = self._get_mcp_server()
+        _, api_key = self._setup_udt_user("udt_list_user@test.com")
+
+        async def _list():
+            async with Client(mcp_server) as client:
+                return await client.call_tool("list_user_tools", {"api_key": api_key})
+
+        result = self._run_async(_list())
+        assert not result.is_error, result
+        data = result.data
+        assert data["tools"] == []
+        assert data["count"] == 0
