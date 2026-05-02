@@ -890,6 +890,16 @@ class AgentOperationsManager:
             "count": len(results),
         }
 
+    def get_iwc_workflow_details(self, trs_id: str) -> dict[str, Any]:
+        """Return the full enriched entry for a single IWC workflow."""
+        workflows = iwc.all_workflows(iwc.fetch_manifest())
+        for wf in workflows:
+            if wf.get("trsID") == trs_id:
+                return iwc.enrich_workflow(wf, include_full_readme=True)
+        raise ValueError(
+            f"IWC workflow with trsID {trs_id!r} not found. Use search_iwc_workflows() to discover trsIDs."
+        )
+
     def get_user(self) -> dict[str, Any]:
         user = self.trans.user
 

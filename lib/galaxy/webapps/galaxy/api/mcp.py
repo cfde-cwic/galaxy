@@ -1016,6 +1016,45 @@ def get_mcp_app(gx_app):
             ops_manager = get_operations_manager(api_key, ctx)
             return ops_manager.search_iwc_workflows(query)
 
+    @mcp.tool()
+    def get_iwc_workflow_details(trs_id: str, api_key: str, ctx: MCPContext) -> dict[str, Any]:
+        """Get comprehensive details about a specific IWC workflow before importing.
+
+        Use this to examine a workflow's full documentation, inputs, and
+        complexity before deciding to import it into your Galaxy instance.
+
+        RECOMMENDED WORKFLOW:
+        1. Search workflows with search_iwc_workflows() or recommend_iwc_workflows()
+        2. Call this function with the trsID to get full details
+        3. Review the readme and inputs to ensure it fits your needs
+        4. Import with import_workflow_from_iwc(trs_id)
+
+        Args:
+            trs_id: The TRS (Tool Registry Service) ID from search results.
+                Format: "#workflow/github.com/iwc-workflows/<name>/<branch>"
+                Example: "#workflow/github.com/iwc-workflows/rnaseq-pe/main"
+
+        Returns:
+            Dict with comprehensive workflow information:
+            - trsID, name, description, tags, categories
+            - readme: Full markdown documentation (the real docs)
+            - readme_summary: Truncated version for quick scanning
+            - step_count: Total number of workflow steps
+            - tools_used: Tool names referenced by the workflow
+            - authors: List of {name, orcid}
+
+        ERROR HANDLING:
+        - "not found": Check trsID spelling; use search_iwc_workflows() to find
+          valid IDs.
+
+        NEXT STEPS:
+        - Import workflow: import_workflow_from_iwc(trs_id)
+        - After import, run with invoke_workflow(workflow_id, inputs)
+        """
+        with _mcp_error_handler("get_iwc_workflow_details"):
+            ops_manager = get_operations_manager(api_key, ctx)
+            return ops_manager.get_iwc_workflow_details(trs_id)
+
     mcp_app = mcp.http_app(path="/")
     mcp_app.state.mcp_server = mcp
 
