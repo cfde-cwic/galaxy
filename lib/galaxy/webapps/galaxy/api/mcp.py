@@ -948,6 +948,36 @@ def get_mcp_app(gx_app):
             ops_manager = get_operations_manager(api_key, ctx)
             return ops_manager.run_user_tool(history_id, tool_uuid, inputs)
 
+    # ==================== IWC ====================
+
+    @mcp.tool()
+    def get_iwc_workflows(api_key: str, ctx: MCPContext) -> dict[str, Any]:
+        """Fetch all workflows from the IWC (Intergalactic Workflows Commission) manifest.
+
+        IWC hosts curated, best-practice workflows for common bioinformatics
+        analyses. This returns the full enriched manifest. For a smaller,
+        query-targeted result set use search_iwc_workflows() or
+        recommend_iwc_workflows().
+
+        Returns:
+            Dict with 'workflows' (list of enriched entries) and 'count'. Each
+            workflow entry includes:
+            - trsID: Unique identifier for importing
+            - name, description, tags
+            - readme_summary: First ~300 chars of documentation
+            - step_count: Number of workflow steps (complexity indicator)
+            - authors: List of {name, orcid}
+            - categories: High-level category classifications
+            - tools_used: Tool names referenced by the workflow
+
+        NEXT STEPS:
+        - Get full details for a workflow: get_iwc_workflow_details(trs_id)
+        - Import to Galaxy: import_workflow_from_iwc(trs_id)
+        """
+        with _mcp_error_handler("get_iwc_workflows"):
+            ops_manager = get_operations_manager(api_key, ctx)
+            return ops_manager.get_iwc_workflows()
+
     mcp_app = mcp.http_app(path="/")
     mcp_app.state.mcp_server = mcp
 

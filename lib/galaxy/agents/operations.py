@@ -12,6 +12,7 @@ from typing import (
 
 from sqlalchemy import select
 
+from galaxy.agents import iwc
 from galaxy.managers.context import ProvidesUserContext
 from galaxy.managers.hdas import HDAManager
 from galaxy.managers.tools import DynamicToolManager
@@ -866,6 +867,17 @@ class AgentOperationsManager:
                 "support_url": getattr(config, "support_url", ""),
                 "terms_url": getattr(config, "terms_url", ""),
             },
+        }
+
+    # ==================== IWC ====================
+
+    def get_iwc_workflows(self) -> dict[str, Any]:
+        """Return all workflows from the IWC manifest as enriched entries."""
+        manifest = iwc.fetch_manifest()
+        workflows = iwc.all_workflows(manifest)
+        return {
+            "workflows": [iwc.enrich_workflow(wf) for wf in workflows],
+            "count": len(workflows),
         }
 
     def get_user(self) -> dict[str, Any]:
