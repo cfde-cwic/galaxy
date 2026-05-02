@@ -96,6 +96,27 @@ def validateInputsBy(inputsBy: Optional[str]) -> Optional[str]:
 InputsByValidator = AfterValidator(validateInputsBy)
 
 
+class ImportFromIwcPayload(Model):
+    trs_id: str = Field(
+        ...,
+        title="TRS ID",
+        description='TRS ID of the workflow in the IWC manifest. Example: "#workflow/github.com/iwc-workflows/rna-seq/main".',
+    )
+
+
+class ImportFromIwcResponse(Model):
+    id: str = Field(..., description="Encoded id of the imported StoredWorkflow.")
+    name: str = Field(..., description="Name of the imported StoredWorkflow.")
+    trsID: str = Field(..., description="TRS ID this workflow was imported from.")
+    missing_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Tool ids referenced by the workflow that are not currently installed. "
+            "Non-empty means the workflow imported but cannot run until an admin installs them."
+        ),
+    )
+
+
 class GetTargetHistoryPayload(Model):
     # TODO - Are the descriptions correct?
     history: Optional[str] = Field(

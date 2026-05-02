@@ -6306,6 +6306,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows/from_iwc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import an IWC workflow into the user's stored workflows by TRS id. */
+        post: operations["import_from_iwc_api_workflows_from_iwc_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workflows/menu": {
         parameters: {
             query?: never;
@@ -15584,6 +15601,37 @@ export interface components {
             states: {
                 [key: string]: number;
             };
+        };
+        /** ImportFromIwcPayload */
+        ImportFromIwcPayload: {
+            /**
+             * TRS ID
+             * @description TRS ID of the workflow in the IWC manifest. Example: "#workflow/github.com/iwc-workflows/rna-seq/main".
+             */
+            trs_id: string;
+        };
+        /** ImportFromIwcResponse */
+        ImportFromIwcResponse: {
+            /**
+             * Id
+             * @description Encoded id of the imported StoredWorkflow.
+             */
+            id: string;
+            /**
+             * Missing Tools
+             * @description Tool ids referenced by the workflow that are not currently installed. Non-empty means the workflow imported but cannot run until an admin installs them.
+             */
+            missing_tools?: string[];
+            /**
+             * Name
+             * @description Name of the imported StoredWorkflow.
+             */
+            name: string;
+            /**
+             * Trsid
+             * @description TRS ID this workflow was imported from.
+             */
+            trsID: string;
         };
         /** ImportToolDataBundle */
         ImportToolDataBundle: {
@@ -50012,6 +50060,51 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+            /** @description Request Error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageExceptionModel"];
+                };
+            };
+            /** @description Server Error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageExceptionModel"];
+                };
+            };
+        };
+    };
+    import_from_iwc_api_workflows_from_iwc_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The user ID that will be used to effectively make this API call. Only admins and designated users can make API calls on behalf of other users. */
+                "run-as"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportFromIwcPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportFromIwcResponse"];
                 };
             };
             /** @description Request Error */
