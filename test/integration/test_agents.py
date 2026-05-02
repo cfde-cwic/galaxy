@@ -351,6 +351,7 @@ class TestMCPServerSmoke(IntegrationTestCase):
             "import_workflow_from_iwc",
             "list_user_tools",
             "create_user_tool",
+            "delete_user_tool",
         }
         assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
 
@@ -617,3 +618,26 @@ class TestMCPServerSmoke(IntegrationTestCase):
         data = result.data
         assert "uuid" in data
         assert data["representation"]["name"] == TOOL_WITH_SHELL_COMMAND["name"]
+
+    def test_mcp_delete_user_tool(self):
+        """delete_user_tool() deactivates a UDT so list_user_tools no longer returns it."""
+        from fastmcp import Client
+        from galaxy_test.base.populators import TOOL_WITH_SHELL_COMMAND
+
+        mcp_server = self._get_mcp_server()
+        _, api_key = self._setup_udt_user("udt_delete_user@test.com")
+
+        async def _flow():
+            async with Client(mcp_server) as client:
+                create = await client.call_tool(
+                    "create_user_tool",
+                    {"api_key": api_key, "representation": TOOL_WITH_SHELL_COMMAND},
+                )
+                uuid = create.data["uuid"]
+                await client.call_tool("delete_user_tool", {"api_key": api_key, "uuid": uuid})
+                listed = await client.call_tool("list_user_tools", {"api_key": api_key})
+                return uuid, listed
+
+        uuid, listed = self._run_async(_flow())
+        uuids_after = {t["uuid"] for t in listed.data["tools"]}
+        assert uuid not in uuids_after
