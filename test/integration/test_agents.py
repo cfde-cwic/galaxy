@@ -350,6 +350,7 @@ class TestMCPServerSmoke(IntegrationTestCase):
             "get_iwc_workflow_details",
             "import_workflow_from_iwc",
             "list_user_tools",
+            "create_user_tool",
         }
         assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
 
@@ -595,3 +596,24 @@ class TestMCPServerSmoke(IntegrationTestCase):
         data = result.data
         assert data["tools"] == []
         assert data["count"] == 0
+
+    def test_mcp_create_user_tool(self):
+        """create_user_tool() persists a UDT and returns its uuid."""
+        from fastmcp import Client
+        from galaxy_test.base.populators import TOOL_WITH_SHELL_COMMAND
+
+        mcp_server = self._get_mcp_server()
+        _, api_key = self._setup_udt_user("udt_create_user@test.com")
+
+        async def _create():
+            async with Client(mcp_server) as client:
+                return await client.call_tool(
+                    "create_user_tool",
+                    {"api_key": api_key, "representation": TOOL_WITH_SHELL_COMMAND},
+                )
+
+        result = self._run_async(_create())
+        assert not result.is_error, result
+        data = result.data
+        assert "uuid" in data
+        assert data["representation"]["name"] == TOOL_WITH_SHELL_COMMAND["name"]

@@ -1075,24 +1075,6 @@ def get_mcp_app(gx_app):
             ops_manager = get_operations_manager(api_key, ctx)
             return ops_manager.import_workflow_from_iwc(trs_id)
 
-    # ==================== User-Defined Tools (UDT) ====================
-
-    @mcp.tool()
-    def list_user_tools(api_key: str, ctx: MCPContext, active: bool = True) -> dict[str, Any]:
-        """List user-defined tools belonging to the current user.
-
-        Args:
-            active: If True (default), only show active tools. Set False to
-                include deactivated tools.
-
-        Returns:
-            Dict with 'tools' (list of user tools, each with id, uuid, tool_id,
-            name, and active status) and 'count'.
-        """
-        with _mcp_error_handler("list_user_tools"):
-            ops_manager = get_operations_manager(api_key, ctx)
-            return ops_manager.list_user_tools(active)
-
     mcp_app = mcp.http_app(path="/")
     mcp_app.state.mcp_server = mcp
 
