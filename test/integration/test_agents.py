@@ -350,6 +350,7 @@ class TestMCPServerSmoke(IntegrationTestCase):
             "search_iwc_workflows",
             "get_iwc_workflow_details",
             "recommend_iwc_workflows",
+            "import_workflow_from_iwc",
         }
         assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
 
@@ -512,3 +513,69 @@ class TestMCPServerSmoke(IntegrationTestCase):
         populator.wait_for_history(history_id, assert_ok=True)
         output = populator.get_history_dataset_content(history_id)
         assert output == "abc\n"
+
+    def test_mcp_import_workflow_from_iwc(self):
+        """import_workflow_from_iwc() creates a StoredWorkflow from a manifest entry."""
+        from unittest.mock import patch
+
+        from fastmcp import Client
+
+        from galaxy.agents import iwc
+
+        mcp_server = self._get_mcp_server()
+        api_key = self._get_api_key()
+
+        # Minimal valid Galaxy workflow definition
+        definition = {
+            "a_galaxy_workflow": "true",
+            "format-version": "0.1",
+            "name": "IWC smoke test workflow",
+            "steps": {
+                "0": {
+                    "id": 0,
+                    "type": "data_input",
+                    "label": "input",
+                    "inputs": [],
+                    "outputs": [],
+                    "tool_state": "{}",
+                    "input_connections": {},
+                    "annotation": "",
+                    "position": {"left": 0, "top": 0},
+                }
+            },
+            "tags": [],
+            "annotation": "",
+        }
+        fake_manifest = [
+            {
+                "workflows": [
+                    {
+                        "trsID": "#workflow/github.com/iwc-workflows/smoke/main",
+                        "definition": definition,
+                        "readme": "smoke",
+                    }
+                ]
+            }
+        ]
+
+        iwc.clear_manifest_cache()
+
+        async def _import():
+            async with Client(mcp_server) as client:
+                return await client.call_tool(
+                    "import_workflow_from_iwc",
+                    {"api_key": api_key, "trs_id": "#workflow/github.com/iwc-workflows/smoke/main"},
+                )
+
+        try:
+            with patch("galaxy.agents.iwc.requests.get") as mock_get:
+                mock_get.return_value.json.return_value = fake_manifest
+                mock_get.return_value.raise_for_status.return_value = None
+                result = self._run_async(_import())
+        finally:
+            iwc.clear_manifest_cache()
+
+        assert not result.is_error, result
+        data = result.data
+        assert "id" in data
+        assert data["trsID"] == "#workflow/github.com/iwc-workflows/smoke/main"

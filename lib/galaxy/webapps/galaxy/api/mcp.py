@@ -1092,6 +1092,43 @@ def get_mcp_app(gx_app):
             ops_manager = get_operations_manager(api_key, ctx)
             return ops_manager.recommend_iwc_workflows(intent, limit)
 
+    @mcp.tool()
+    def import_workflow_from_iwc(trs_id: str, api_key: str, ctx: MCPContext) -> dict[str, Any]:
+        """Import an IWC workflow into the user's stored workflows.
+
+        The workflow is materialized through Galaxy's standard workflow-import
+        path (workflow_contents_manager.build_workflow_from_raw_description),
+        so it ends up as a private StoredWorkflow owned by the calling user --
+        the same shape any other imported workflow has.
+
+        RECOMMENDED WORKFLOW:
+        1. Find the workflow with search_iwc_workflows() or recommend_iwc_workflows()
+        2. Inspect with get_iwc_workflow_details(trs_id) to confirm it's the right one
+        3. Import with this tool, then run with invoke_workflow()
+
+        Args:
+            trs_id: TRS ID of the workflow in the IWC manifest.
+                Format: "#workflow/github.com/iwc-workflows/<name>/<branch>"
+
+        Returns:
+            Dict with the imported workflow's id, name, original trsID, and
+            `missing_tools` -- a list of tool ids referenced by the workflow
+            that are not currently installed in this Galaxy. A non-empty
+            missing_tools list means the workflow imported but won't run
+            until an admin installs the missing tools.
+
+        ERROR HANDLING:
+        - "not found": trsID isn't in the IWC manifest. Use search_iwc_workflows().
+        - "no embedded definition": the manifest entry is malformed; report upstream.
+
+        NEXT STEPS:
+        - Run the workflow: invoke_workflow(workflow_id, history_id, inputs)
+        - Inspect inputs/outputs: get_workflow_details(workflow_id)
+        """
+        with _mcp_error_handler("import_workflow_from_iwc"):
+            ops_manager = get_operations_manager(api_key, ctx)
+            return ops_manager.import_workflow_from_iwc(trs_id)
+
     mcp_app = mcp.http_app(path="/")
     mcp_app.state.mcp_server = mcp
 

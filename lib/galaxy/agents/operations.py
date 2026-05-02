@@ -16,6 +16,7 @@ from galaxy.agents import iwc
 from galaxy.managers.context import ProvidesUserContext
 from galaxy.managers.hdas import HDAManager
 from galaxy.managers.tools import DynamicToolManager
+from galaxy.managers.workflows import WorkflowCreateOptions
 from galaxy.model import UserDynamicToolAssociation
 from galaxy.schema import (
     FilterQueryParams,
@@ -909,6 +910,43 @@ class AgentOperationsManager:
             "recommendations": results,
             "count": len(results),
         }
+
+    def import_workflow_from_iwc(self, trs_id: str) -> dict[str, Any]:
+        """Import an IWC workflow into the user's stored workflows.
+
+        Uses the in-process workflow_contents_manager path -- the same one
+        the workflows REST API uses -- so the imported workflow ends up as a
+        private StoredWorkflow owned by the calling user.
+        """
+        workflows = iwc.all_workflows(iwc.fetch_manifest())
+        workflow_entry = next((wf for wf in workflows if wf.get("trsID") == trs_id), None)
+        if workflow_entry is None:
+            raise ValueError(
+                f"IWC workflow with trsID {trs_id!r} not found. Use search_iwc_workflows() to discover trsIDs."
+            )
+        definition = workflow_entry.get("definition")
+        if not definition:
+            raise ValueError(f"IWC workflow {trs_id!r} has no embedded definition; cannot import.")
+
+        contents_manager = self.app.workflow_contents_manager
+        raw_workflow_description = contents_manager.ensure_raw_description(definition)
+        create_options = WorkflowCreateOptions(publish=False, importable=False, import_tools=False)
+        created = contents_manager.build_workflow_from_raw_description(
+            self.trans,
+            raw_workflow_description,
+            create_options,
+            source=f"IWC ({trs_id})",
+        )
+        stored = created.stored_workflow
+        missing_tools = [tup[0] for tup in (created.missing_tools or [])]
+        return self._encode_ids_in_response(
+            {
+                "id": stored.id,
+                "name": stored.name,
+                "trsID": trs_id,
+                "missing_tools": missing_tools,
+            }
+        )
 
     def get_user(self) -> dict[str, Any]:
         user = self.trans.user
