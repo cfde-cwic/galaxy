@@ -1055,6 +1055,43 @@ def get_mcp_app(gx_app):
             ops_manager = get_operations_manager(api_key, ctx)
             return ops_manager.get_iwc_workflow_details(trs_id)
 
+    @mcp.tool()
+    def recommend_iwc_workflows(intent: str, api_key: str, ctx: MCPContext, limit: int = 5) -> dict[str, Any]:
+        """Find IWC workflows matching a natural-language analysis goal.
+
+        Use this when you have a general analysis goal (rather than specific
+        keywords) and want the best-matching workflows. Ranks across names,
+        descriptions, readmes, tags, and tool names.
+
+        RECOMMENDED WORKFLOW:
+        1. Describe your analysis goal in natural language
+        2. Review ranked recommendations and their match_score values
+        3. Get details for promising workflows: get_iwc_workflow_details(trs_id)
+        4. Import the best match: import_workflow_from_iwc(trs_id)
+
+        Args:
+            intent: Natural language description of the analysis goal. Examples:
+                - "I have paired-end RNA-seq data and want differential expression"
+                - "Assemble a bacterial genome from nanopore reads"
+                - "Variant calling from whole exome sequencing data"
+                - "Quality control for Illumina sequencing data"
+            limit: Maximum number of recommendations to return (default 5).
+
+        Returns:
+            Dict with 'intent', 'recommendations' (each in the enriched workflow
+            shape with a match_score field), and 'count'.
+
+        TIP: Be specific. "RNA-seq" matches many workflows, but "differential
+        expression RNA-seq human samples" ranks them more usefully.
+
+        NEXT STEPS:
+        - Get full details: get_iwc_workflow_details(trs_id)
+        - Import top choice: import_workflow_from_iwc(trs_id)
+        """
+        with _mcp_error_handler("recommend_iwc_workflows"):
+            ops_manager = get_operations_manager(api_key, ctx)
+            return ops_manager.recommend_iwc_workflows(intent, limit)
+
     mcp_app = mcp.http_app(path="/")
     mcp_app.state.mcp_server = mcp
 

@@ -900,6 +900,16 @@ class AgentOperationsManager:
             f"IWC workflow with trsID {trs_id!r} not found. Use search_iwc_workflows() to discover trsIDs."
         )
 
+    def recommend_iwc_workflows(self, intent: str, limit: int = 5) -> dict[str, Any]:
+        """Rank IWC workflows by token overlap against a natural-language intent."""
+        workflows = iwc.all_workflows(iwc.fetch_manifest())
+        results = iwc.search_workflows(workflows, intent, limit=limit)
+        return {
+            "intent": intent,
+            "recommendations": results,
+            "count": len(results),
+        }
+
     def get_user(self) -> dict[str, Any]:
         user = self.trans.user
 
