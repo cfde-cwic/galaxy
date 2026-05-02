@@ -5,6 +5,7 @@ Delegates to the Galaxy service layer for validation, permission checks, and pag
 """
 
 import logging
+from copy import deepcopy
 from typing import (
     Any,
     Optional,
@@ -929,7 +930,7 @@ class AgentOperationsManager:
             raise ValueError(f"IWC workflow {trs_id!r} has no embedded definition; cannot import.")
 
         contents_manager = self.app.workflow_contents_manager
-        raw_workflow_description = contents_manager.ensure_raw_description(definition)
+        raw_workflow_description = contents_manager.ensure_raw_description(deepcopy(definition))
         create_options = WorkflowCreateOptions(publish=False, importable=False, import_tools=False)
         created = contents_manager.build_workflow_from_raw_description(
             self.trans,
