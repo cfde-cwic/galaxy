@@ -63,7 +63,10 @@ from galaxy.tool_util.parameters import (
     ToolParameterT,
 )
 from galaxy.tool_util.verify import ToolTestDescriptionDict
-from galaxy.tool_util_models import UserToolSource
+from galaxy.tool_util_models import (
+    lift_user_tool_source,
+    UserToolSource,
+)
 from galaxy.tools.evaluation import global_tool_errors
 from galaxy.tools.fetch.workbooks import (
     FetchWorkbookCollectionType,
@@ -878,7 +881,24 @@ class ToolsController(BaseGalaxyAPIController, UsesVisualizationMixin):
         trans.response.headers["language"] = tool.tool_source.language
         if dynamic_tool := getattr(tool, "dynamic_tool", None):
             if dynamic_tool.value.get("class") == "GalaxyUserTool":
-                return UserToolSource(**dynamic_tool.value).model_dump_json(
+                status, lifted, errors = lift_user_tool_source(dynamic_tool.value)
+                if status == "lifted" and errors:
+                    compact = ",".join(errors)
+                    trans.response.headers["X-Galaxy-Deprecated-Fields"] = compact
+                    trans.response.headers["Warning"] = (
+                        f'299 - "Some conventions are no longer valid; ignored on read: {compact}"'
+                    )
+                elif status == "invalid":
+                    compact = "; ".join(errors)
+                    trans.response.headers["X-Galaxy-Schema-Errors"] = compact
+                    trans.response.headers["Warning"] = f'299 - "Stored tool no longer satisfies schema: {compact}"'
+                    # Return the raw stored value so callers can still inspect /
+                    # repair the YAML manually.
+                    import json
+
+                    return json.dumps(dynamic_tool.value)
+                assert isinstance(lifted, UserToolSource)
+                return lifted.model_dump_json(
                     by_alias=True,
                     exclude_defaults=True,
                     exclude_unset=True,

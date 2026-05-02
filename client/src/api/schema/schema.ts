@@ -23889,7 +23889,23 @@ export interface components {
              * @example 0123456789ABCDEF
              */
             id: string;
-            representation: components["schemas"]["UserToolSource-Output"];
+            /** Representation */
+            representation:
+                | components["schemas"]["UserToolSource-Output"]
+                | {
+                      [key: string]: unknown;
+                  };
+            /**
+             * Representation Errors
+             * @default []
+             */
+            representation_errors: string[];
+            /**
+             * Representation Status
+             * @default ok
+             * @enum {string}
+             */
+            representation_status: "ok" | "lifted" | "invalid";
             /** Tool Format */
             tool_format: string | null;
             /** Tool Id */

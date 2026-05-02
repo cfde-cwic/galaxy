@@ -149,7 +149,8 @@ export function useAgentActions() {
                 return;
             }
 
-            toast.success(`Tool "${data.representation.name}" saved successfully!`);
+            const repName = (data.representation as Record<string, unknown> | undefined)?.name ?? data.uuid;
+            toast.success(`Tool "${String(repName)}" saved successfully!`);
             unprivilegedToolStore.load(true);
             router.push(`/tools/editor/${data.uuid}`);
         } catch (err) {

@@ -9,6 +9,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Tuple,
     Union,
 )
 
@@ -21,6 +22,7 @@ from pydantic import (
     model_validator,
     RootModel,
     Tag,
+    ValidationError,
 )
 from typing_extensions import (
     Annotated,
@@ -153,6 +155,95 @@ class YamlToolSource(_DynamicToolSourceBase):
 
 
 DynamicToolSources = Annotated[Union[UserToolSource, YamlToolSource], Field(discriminator="class_")]
+
+
+# ---------------------------------------------------------------------------
+# Schema-drift "lift" for stored DynamicTool.value rows.
+#
+# The strict `UserToolSource` schema is the single source of truth for both
+# input and output. Stored rows from older Galaxy versions may carry fields
+# that the current schema rejects (e.g. legacy internal-model fields after the
+# YAML narrowing) or values that fail tightened constraints (e.g. a future
+# `container` regex). `lift_user_tool_source` validates against the strict
+# schema and:
+#   - on success: returns ("ok", parsed_model, []).
+#   - on `extra_forbidden`-only failure: strips the offending paths and
+#     re-validates. Returns ("lifted", parsed_model, dropped_paths).
+#   - on any other failure: returns ("invalid", original_dict, error_summary).
+#     The endpoint exposes this so legacy/broken rows don't crash the API.
+# ---------------------------------------------------------------------------
+
+LiftStatus = Literal["ok", "lifted", "invalid"]
+
+
+def _navigable_path(value: Any, loc: tuple) -> Tuple[Optional[Any], List[Any]]:
+    """Walk `loc` against the structure of `value`, skipping steps that don't
+    correspond to a real key/index (pydantic inserts discriminator literals
+    like `"data"` into the loc for tagged unions). Returns the parent
+    container of the leaf and the cleaned path components, or (None, []) if
+    the path can't be resolved."""
+    cur: Any = value
+    *prefix, leaf = loc
+    cleaned: List[Any] = []
+    for step in prefix:
+        if isinstance(cur, list) and isinstance(step, int) and 0 <= step < len(cur):
+            cur = cur[step]
+            cleaned.append(step)
+        elif isinstance(cur, dict) and step in cur:
+            cur = cur[step]
+            cleaned.append(step)
+        # else: skip — discriminator tag or stale path
+    cleaned.append(leaf)
+    return cur, cleaned
+
+
+def _format_loc(value: Any, loc: tuple) -> str:
+    _parent, cleaned = _navigable_path(value, loc)
+    return ".".join(str(p) for p in cleaned if p != "representation")
+
+
+def _strip_path(value: dict, loc: tuple) -> bool:
+    """Remove the field at the given pydantic error `loc` from `value`. Returns
+    True if a key was actually removed."""
+    parent, cleaned = _navigable_path(value, loc)
+    if not cleaned or not isinstance(parent, dict):
+        return False
+    leaf = cleaned[-1]
+    if leaf in parent:
+        del parent[leaf]
+        return True
+    return False
+
+
+def lift_user_tool_source(
+    value: dict,
+) -> Tuple[LiftStatus, Union["UserToolSource", Dict[str, Any]], List[str]]:
+    """Validate `value` against the strict UserToolSource, lifting drift where
+    safe. See module docstring above for the contract.
+    """
+    import copy
+
+    try:
+        return ("ok", UserToolSource.model_validate(value), [])
+    except ValidationError as e:
+        errors = e.errors()
+
+    extra_forbidden = [err for err in errors if err.get("type") == "extra_forbidden"]
+    other = [err for err in errors if err.get("type") != "extra_forbidden"]
+    if extra_forbidden and not other:
+        stripped = copy.deepcopy(value)
+        dropped: List[str] = []
+        for err in extra_forbidden:
+            loc = tuple(err["loc"])
+            if _strip_path(stripped, loc):
+                dropped.append(_format_loc(value, loc))
+        try:
+            return ("lifted", UserToolSource.model_validate(stripped), dropped)
+        except ValidationError as e2:
+            errors = e2.errors()
+
+    summary = [f"{_format_loc(value, tuple(err['loc']))}: {err.get('msg', err.get('type', ''))}" for err in errors]
+    return ("invalid", value, summary)
 
 
 class ParsedTool(ToolSourceBaseModel):
