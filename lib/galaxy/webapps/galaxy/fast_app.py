@@ -286,6 +286,9 @@ def include_mcp(app: FastAPI, gx_app, mcp_app):
 
     try:
         mcp_path = gx_app.config.mcp_server_path
+        # Requests served by the mounted sub-app see request.app == mcp_app, so
+        # share the parent's route name index for UrlBuilder._url_path_for.
+        mcp_app.state.route_name_index = app.state.route_name_index
         app.mount(mcp_path, mcp_app)
         log.info(f"MCP server (Streamable HTTP) mounted at {mcp_path}")
     except Exception as e:
