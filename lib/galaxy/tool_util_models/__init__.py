@@ -279,6 +279,8 @@ def _navigable_path(value: Any, loc: tuple) -> Tuple[Optional[Any], List[Any]]:
     container of the leaf and the cleaned path components, or (None, []) if
     the path can't be resolved."""
     cur: Any = value
+    if not loc:
+        return cur, []
     *prefix, leaf = loc
     cleaned: List[Any] = []
     for step in prefix:
