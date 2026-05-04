@@ -7,17 +7,26 @@ Uses Streamable HTTP transport with stateless mode for multi-worker compatibilit
 
 import logging
 from contextlib import contextmanager
-from typing import Any
+from typing import (
+    Any,
+    Optional,
+)
+from urllib.parse import urlparse
 
 from fastmcp import (
     Context as MCPContext,
     FastMCP,
     settings as fastmcp_settings,
 )
+from starlette.datastructures import URL
 
 from galaxy.agents.operations import AgentOperationsManager
 from galaxy.managers.users import UserManager
-from galaxy.work.context import WorkRequestContext
+from galaxy.work.context import (
+    GalaxyAbstractRequest,
+    GalaxyAbstractResponse,
+    SessionRequestContext,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +81,68 @@ def get_mcp_url_builder(fallback_base_url: str):
     return MCPUrlBuilder(fallback_base_url)
 
 
+class _StaticRequest(GalaxyAbstractRequest):
+    """Minimal GalaxyAbstractRequest backed by a configured base URL.
+
+    MCP tools run outside of an HTTP request, but downstream serializers
+    (notably HDASerializer.serialize_old_display_applications) read
+    ``trans.request.base`` to build absolute display-app URLs.
+    """
+
+    def __init__(self, base_url: str) -> None:
+        # Match GalaxyASGIRequest.base shape (Starlette base_url always has trailing slash).
+        self._base = base_url if base_url.endswith("/") else f"{base_url}/"
+        self._parsed = urlparse(self._base)
+
+    @property
+    def base(self) -> str:
+        return self._base
+
+    @property
+    def url_path(self) -> str:
+        return self._base
+
+    @property
+    def host(self) -> str:
+        return self._parsed.netloc
+
+    @property
+    def is_secure(self) -> bool:
+        return self._parsed.scheme == "https"
+
+    def get_cookie(self, name: str) -> Optional[str]:
+        return None
+
+    @property
+    def url(self) -> URL:
+        return URL(self._base)
+
+
+class _StaticResponse(GalaxyAbstractResponse):
+    """No-op GalaxyAbstractResponse for MCP contexts (no HTTP response surface)."""
+
+    def __init__(self) -> None:
+        self._headers: dict = {}
+
+    @property
+    def headers(self) -> dict:
+        return self._headers
+
+    def set_cookie(
+        self,
+        key: str,
+        value: str = "",
+        max_age: Optional[int] = None,
+        expires: Optional[int] = None,
+        path: str = "/",
+        domain: Optional[str] = None,
+        secure: bool = False,
+        httponly: bool = False,
+        samesite: Optional[str] = "lax",
+    ) -> None:
+        return None
+
+
 @contextmanager
 def _mcp_error_handler(operation: str):
     """Standard error handling for MCP tool calls."""
@@ -90,7 +161,7 @@ def get_mcp_app(gx_app):
 
     mcp = FastMCP("Galaxy")
 
-    base_url = getattr(gx_app.config, "galaxy_infrastructure_url", "http://localhost:8080")
+    base_url = gx_app.config.galaxy_infrastructure_url
     user_manager = UserManager(gx_app)
 
     def get_operations_manager(api_key: str, ctx: MCPContext) -> AgentOperationsManager:
@@ -109,7 +180,13 @@ def get_mcp_app(gx_app):
             )
 
         url_builder = get_mcp_url_builder(base_url)
-        trans = WorkRequestContext(app=gx_app, user=user, url_builder=url_builder)
+        trans = SessionRequestContext(
+            app=gx_app,
+            user=user,
+            url_builder=url_builder,
+            request=_StaticRequest(base_url),
+            response=_StaticResponse(),
+        )
 
         return AgentOperationsManager(app=gx_app, trans=trans)
 
