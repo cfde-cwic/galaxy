@@ -8,7 +8,7 @@
         <edam_operation>operation_0224</edam_operation>
     </edam_operations>
   <command><![CDATA[
-    python '$__tool_directory__/data_fetch.py'
+    galaxy-data-fetch
                 --galaxy-root '$GALAXY_ROOT_DIR'
                 --datatypes-registry '$GALAXY_DATATYPES_CONF_FILE'
                 --request-version '$request_version'
