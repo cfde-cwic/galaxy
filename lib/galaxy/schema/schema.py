@@ -3478,7 +3478,7 @@ AnyLibraryFolderItem = Annotated[Union[FileLibraryFolderItem, FolderLibraryFolde
 class LibraryFolderMetadata(Model):
     parent_library_id: EncodedDatabaseIdField
     folder_name: str
-    folder_description: str
+    folder_description: str | None
     total_rows: int
     can_modify_folder: bool
     can_add_library_item: bool

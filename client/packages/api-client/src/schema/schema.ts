@@ -19306,7 +19306,7 @@ export interface components {
             /** Can Modify Folder */
             can_modify_folder: boolean;
             /** Folder Description */
-            folder_description: string;
+            folder_description: string | null;
             /** Folder Name */
             folder_name: string;
             /** Full Path */

@@ -3959,6 +3959,15 @@ class LibraryPopulator:
         destination = {"type": "library_folder", "library_folder_id": folder_id}
         return history_id, library, destination
 
+    def fetch_to_folder(self, folder_id: str, items: list[dict[str, Any]], history_id: str | None = None) -> Response:
+        """Fetch ``items`` into the library folder with encoded (``F``-prefixed) id ``folder_id``."""
+        destination = {"type": "library_folder", "library_folder_id": folder_id[1:]}
+        payload = {
+            "history_id": history_id or self.dataset_populator.new_history(),
+            "targets": [{"destination": destination, "items": items}],
+        }
+        return self.dataset_populator.fetch(payload)
+
 
 class BaseDatasetCollectionPopulator:
     dataset_populator: BaseDatasetPopulator
