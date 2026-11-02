@@ -6928,6 +6928,7 @@ class LibraryDataset(Base, Serializable):
 
 
 class LibraryDatasetDatasetAssociation(DatasetInstance, HasName, Serializable):
+    extension: Mapped[str]
     message: Mapped[Optional[str]]
     tags: Mapped[list["LibraryDatasetDatasetAssociationTagAssociation"]]
 
